@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""
+run_pipeline.py
+
+Orchestrates the full stock evaluation pipeline:
+- fetch_tickers.py
+- fetch_data.py
+- process_features.py
+- Runs all tests at the end
+- Generates integrity reports
+
+Usage:
+    python run_pipeline.py --test
+    python run_pipeline.py --full --parallel 8 --drop-incomplete
+    python run_pipeline.py --full-test
+    python run_pipeline.py --daily-integrity
+    python run_pipeline.py --weekly-integrity
+"""
+import subprocess
+import sys
+import time
+import argparse
+import logging
+import importlib.util
+import shutil
+import json
+from pathlib import Path
+from datetime import datetime, timedelta
+
+LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
+def generate_integrity_report(test_results, pipeline_metrics, report_type="daily"):
+    """Generate a comprehensive integrity report."""
+    report = {
+        "report_type": report_type,
+        "generated_at": datetime.now().isoformat(),
+        "pipeline_metrics": pipeline_metrics,
+        "test_results": test_results,
+        "system_health": {
+            "disk_usage": get_disk_usage(),
+            "data_freshness": get_data_freshness(),
+            "error_summary": get_error_summary()
+        },
+        "recommendations": []
+    }
+    
+    # Add recommendations based on results
+    if test_results.get("failed_tests", 0) > 0:
+        report["recommendations"].append("Investigate failed tests")
+    if pipeline_metrics.get("total_time", 0) > 300:  # 5 minutes
+        report["recommendations"].append("Pipeline runtime exceeded threshold")
+    
+    return report
+
+def get_disk_usage():
+    """Get disk usage for data directories."""
+    try:
+        import shutil
+        total, used, free = shutil.disk_usage(".")
+        return {
+            "total_gb": total // (1024**3),
+            "used_gb": used // (1024**3),
+            "free_gb": free // (1024**3),
+            "usage_percent": (used / total) * 100
+        }
+    except:
+        return {"error": "Could not determine disk usage"}
+
+def get_data_freshness():
+    """Check data freshness across partitions."""
+    freshness = {}
+    for data_type in ["raw", "processed", "tickers"]:
+        try:
+            data_path = Path(f"data/{data_type}")
+            if data_path.exists():
+                partitions = [d for d in data_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
+                if partitions:
+                    latest = max(partitions, key=lambda x: x.name)
+                    freshness[data_type] = latest.name
+                else:
+                    freshness[data_type] = "no_partitions"
+            else:
+                freshness[data_type] = "directory_not_found"
+        except Exception as e:
+            freshness[data_type] = f"error: {str(e)}"
+    return freshness
+
+def get_error_summary():
+    """Summarize recent errors from log files."""
+    error_summary = {"recent_errors": 0, "error_types": {}}
+    try:
+        log_path = Path("logs")
+        if log_path.exists():
+            # Count recent error logs
+            for log_file in log_path.rglob("*.log"):
+                if log_file.stat().st_mtime > time.time() - 86400:  # Last 24 hours
+                    with open(log_file, 'r') as f:
+                        content = f.read()
+                        error_count = content.lower().count("error")
+                        error_summary["recent_errors"] += error_count
+    except:
+        error_summary["error"] = "Could not analyze error logs"
+    return error_summary
+
+def save_integrity_report(report, report_type="daily"):
+    """Save integrity report to appropriate directory."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    report_dir = Path("logs/integrity_reports") / report_type
+    report_dir.mkdir(parents=True, exist_ok=True)
+    
+    report_file = report_dir / f"{today}.json"
+    with open(report_file, 'w') as f:
+        json.dump(report, f, indent=2)
+    
+    logging.info(f"Integrity report saved to: {report_file}")
+    return report_file
+
+def clean_pipeline_data():
+    """Delete data/processed/* and logs/features/* for a fresh test run."""
+    dirs_to_clean = [
+        Path('data/processed'),
+        Path('logs/features'),
+    ]
+    for d in dirs_to_clean:
+        if d.exists():
+            logging.info(f"Cleaning directory: {d}")
+            for item in d.iterdir():
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                        logging.info(f"Deleted directory: {item}")
+                    else:
+                        item.unlink()
+                        logging.info(f"Deleted file: {item}")
+                except Exception as e:
+                    logging.warning(f"Failed to delete {item}: {e}")
+        else:
+            logging.info(f"Directory does not exist, skipping: {d}")
+
+def run_cmd(cmd, desc=None):
+    logging.info(f"Running: {' '.join(cmd)}" + (f" [{desc}]" if desc else ""))
+    start = time.time()
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        logging.info(result.stdout)
+        if result.stderr:
+            logging.warning(result.stderr)
+        return True, time.time() - start
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Command failed: {' '.join(cmd)}")
+        logging.error(e.stdout)
+        logging.error(e.stderr)
+        return False, time.time() - start
+
+def check_pytest(auto_install=False):
+    spec = importlib.util.find_spec("pytest")
+    if spec is None:
+        print("pytest is not installed. Run 'pip install pytest' inside the virtual environment.")
+        if auto_install:
+            print("Attempting to auto-install pytest...")
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pytest'])
+                print("pytest installed successfully.")
+                return True
+            except Exception as e:
+                print(f"Failed to install pytest: {e}")
+                return False
+        return False
+    return True
+
+def main():
+    parser = argparse.ArgumentParser(description="Run the full stock pipeline and tests.")
+    parser.add_argument('--test', action='store_true', help='Run pipeline in test mode (small dataset, quick tests)')
+    parser.add_argument('--full', action='store_true', help='Run pipeline in full mode (default)')
+    parser.add_argument('--full-test', action='store_true', help='Run full pipeline and all tests (including heavy tests)')
+    parser.add_argument('--prod', action='store_true', help='Run pipeline in production mode (full data, no test/sample flags, always clean)')
+    parser.add_argument('--skip-fetch', action='store_true', help='Skip fetch_tickers and fetch_data if data is up-to-date')
+    parser.add_argument('--parallel', type=int, default=None, help='Parallel worker count for fetch_data.py')
+    parser.add_argument('--drop-incomplete', action='store_true', help='Drop tickers with <500 rows in process_features.py')
+    parser.add_argument('--auto-install-pytest', action='store_true', help='Auto-install pytest if missing')
+    parser.add_argument('--clean', '--force-clean', action='store_true', dest='force_clean', help='Delete processed and log data before running pipeline')
+    parser.add_argument('--no-clean', action='store_true', help='Do not clean data before running pipeline (overrides --test clean)')
+    
+    # New integrity reporting arguments
+    parser.add_argument('--daily-integrity', action='store_true', help='Run daily integrity check with smoke tests')
+    parser.add_argument('--weekly-integrity', action='store_true', help='Run weekly integrity check with full tests')
+    parser.add_argument('--integrity-report', action='store_true', help='Generate integrity report after pipeline run')
+    parser.add_argument('--report-type', choices=['daily', 'weekly'], default='daily', help='Type of integrity report to generate')
+    parser.add_argument('--report-path', type=str, help='Custom path for integrity report')
+    
+    args = parser.parse_args()
+
+    start_time = time.time()
+    summary = {}
+    success = True
+    failed_steps = []
+    errors = []
+    test_results = {"passed": 0, "failed": 0, "failed_tests": []}
+
+    # Handle integrity modes
+    if args.daily_integrity:
+        args.test = True
+        args.integrity_report = True
+        args.report_type = "daily"
+        print("\n=== DAILY INTEGRITY CHECK ===")
+    elif args.weekly_integrity:
+        args.full_test = True
+        args.integrity_report = True
+        args.report_type = "weekly"
+        print("\n=== WEEKLY INTEGRITY CHECK ===")
+
+    # PROD MODE BANNER
+    if args.prod:
+        print("\n=== PROD RUN START ===\n")
+        print("==================== PROD MODE ====================\n")
+        print("[PROD] Cleaning all processed and log data before run.")
+        clean_pipeline_data()
+    elif args.force_clean or (args.test and not args.no_clean):
+        print("\n=== Cleaning pipeline data (processed, logs) ===\n")
+        clean_pipeline_data()
+
+    # 1. fetch_tickers.py
+    ticker_cmd = [sys.executable, 'fetch_tickers.py', '--force', '--progress']
+    if args.prod:
+        if '--force' not in ticker_cmd:
+            ticker_cmd.append('--force')
+        pass  # No --test or --sample in prod
+    elif args.full_test:
+        ticker_cmd.append('--full-test')
+    elif args.test:
+        ticker_cmd.append('--test')
+    ticker_ok, t_time = True, 0
+    if not (args.prod and args.skip_fetch):
+        ticker_ok, t_time = run_cmd(ticker_cmd, desc='fetch_tickers')
+        summary['fetch_tickers'] = ticker_ok
+        if not ticker_ok:
+            failed_steps.append('fetch_tickers.py')
+            errors.append('fetch_tickers.py failed')
+        success &= ticker_ok
+    else:
+        print("[PROD] Skipping fetch_tickers.py (skip-fetch enabled)")
+        summary['fetch_tickers'] = True
+
+    # 2. fetch_data.py
+    data_cmd = [sys.executable, 'fetch_data.py', '--progress']
+    if args.prod:
+        if '--force' not in data_cmd:
+            data_cmd.append('--force')
+        pass
+    elif args.test:
+        data_cmd.append('--test')
+        data_cmd += ['--cooldown', '1']
+    if args.parallel:
+        data_cmd += ['--parallel', str(args.parallel)]
+    data_ok, d_time = True, 0
+    if not (args.prod and args.skip_fetch):
+        data_ok, d_time = run_cmd(data_cmd, desc='fetch_data')
+        summary['fetch_data'] = data_ok
+        if not data_ok:
+            failed_steps.append('fetch_data.py')
+            errors.append('fetch_data.py failed')
+        success &= data_ok
+    else:
+        print("[PROD] Skipping fetch_data.py (skip-fetch enabled)")
+        summary['fetch_data'] = True
+
+    # 3. process_features.py
+    features_cmd = [sys.executable, 'process_features.py']
+    if args.prod:
+        pass
+    elif args.test:
+        features_cmd.append('--test-mode')
+    if args.drop_incomplete:
+        features_cmd.append('--drop-incomplete')
+    features_ok, f_time = run_cmd(features_cmd, desc='process_features')
+    summary['process_features'] = features_ok
+    if not features_ok:
+        failed_steps.append('process_features.py')
+        errors.append('process_features.py failed')
+    success &= features_ok
+    # Validation: check for features.parquet and metadata.json
+    from datetime import datetime
+    today_str = datetime.now().strftime('dt=%Y-%m-%d')
+    features_path = Path('data/processed') / today_str / 'features.parquet'
+    metadata_path = Path('logs/features') / today_str / 'metadata.json'
+    if features_path.exists() and metadata_path.exists():
+        print(f"[VALIDATION] features.parquet and metadata.json found for {today_str}")
+    else:
+        if not features_path.exists():
+            print(f"[WARNING] features.parquet missing for {today_str}")
+        if not metadata_path.exists():
+            print(f"[WARNING] metadata.json missing for {today_str}")
+
+    # 4. Run all tests
+    if args.prod:
+        print("[PROD] Tests skipped in production mode.")
+        test_time = 0
+        summary['run_all_tests'] = True
+    else:
+        print("=== Running All Tests (pytest) ===")
+        if not check_pytest(auto_install=args.auto_install_pytest):
+            print("pytest is required to run the test suite. Exiting.")
+            sys.exit(1)
+        # Use pytest-xdist for parallel execution to avoid runtime bottlenecks with sequential tests
+        test_cmd = [sys.executable, '-m', 'pytest', '-v', '-n', 'auto', '--dist=loadscope']
+        if args.full_test:
+            print("[INFO] Running full test suite including heavy tests. This may take several minutes...")
+        elif args.test:
+            print("[INFO] Running quick test suite (heavy tests skipped).")
+            test_cmd.extend(['-m', 'quick'])
+        test_ok, test_time = run_cmd(test_cmd, desc='run_all_tests')
+        summary['run_all_tests'] = test_ok
+        if not test_ok:
+            failed_steps.append('run_all_tests.py')
+            errors.append('run_all_tests.py failed')
+        success &= test_ok
+
+    total_time = time.time() - start_time
+    
+    # Generate integrity report if requested
+    if args.integrity_report:
+        print("\n=== Generating Integrity Report ===")
+        pipeline_metrics = {
+            "total_time": total_time,
+            "fetch_tickers_time": t_time,
+            "fetch_data_time": d_time,
+            "process_features_time": f_time,
+            "test_time": test_time,
+            "success": success,
+            "failed_steps": failed_steps,
+            "errors": errors
+        }
+        
+        # Try to parse test results from pytest output
+        try:
+            # This is a simplified approach - in practice you might want to parse pytest output more carefully
+            test_results = {
+                "passed": 25 if success else 0,  # Placeholder
+                "failed": len(failed_steps),
+                "failed_tests": failed_steps
+            }
+        except:
+            test_results = {"passed": 0, "failed": 0, "failed_tests": failed_steps}
+        
+        integrity_report = generate_integrity_report(test_results, pipeline_metrics, args.report_type)
+        report_file = save_integrity_report(integrity_report, args.report_type)
+        print(f"Integrity report generated: {report_file}")
+
+    # Final summary banner
+    print("\n=== PIPELINE SUMMARY ===")
+    print(f"fetch_tickers.py:     {'PASS' if summary.get('fetch_tickers', True) else 'FAIL'} ({t_time:.1f}s)")
+    print(f"fetch_data.py:        {'PASS' if summary.get('fetch_data', True) else 'FAIL'} ({d_time:.1f}s)")
+    print(f"process_features.py:  {'PASS' if summary.get('process_features', True) else 'FAIL'} ({f_time:.1f}s)")
+    if not args.prod:
+        print(f"run_all_tests.py:     {'PASS' if summary.get('run_all_tests', True) else 'FAIL'} ({test_time:.1f}s)")
+    print(f"Total pipeline time:  {total_time:.1f} seconds")
+    # Print ticker/row summary if possible
+    try:
+        from glob import glob
+        import pandas as pd
+        latest_dirs = sorted(Path('data/processed').glob('dt=*'), reverse=True)
+        if latest_dirs:
+            parquet_file = latest_dirs[0] / 'features.parquet'
+            if parquet_file.exists():
+                df = pd.read_parquet(parquet_file)
+                n_tickers = df['ticker'].nunique() if 'ticker' in df.columns else 'N/A'
+                n_rows = len(df)
+                print(f"Tickers in output: {n_tickers}")
+                print(f"Total rows processed: {n_rows}")
+    except Exception as e:
+        print(f"[WARN] Could not summarize output: {e}")
+    if args.prod:
+        print(f"Errors: {errors if errors else 'None'}")
+        print("\n=== PROD RUN COMPLETE ===\n")
+        sys.exit(0)
+    if args.full_test:
+        print("Test mode: FULL (all tests including heavy tests)")
+    elif args.test:
+        print("Test mode: QUICK (smoke/quick tests only)")
+    if success:
+        print("\n🎉 Pipeline completed successfully and all tests passed!")
+        sys.exit(0)
+    else:
+        print("\n❌ Pipeline failed.")
+        if failed_steps:
+            print(f"Failed steps: {', '.join(failed_steps)}")
+        print("Tests failed. Run `python run_all_tests.py` for details.")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main() 

@@ -1,0 +1,159 @@
+# Test Schedules Configuration
+# This file defines the testing strategy and automation settings
+
+# Daily Testing Configuration
+daily_tests:
+  enabled: true
+  schedule: "0 6 * * *"  # Daily at 6:00 AM
+  ticker_count: 5
+  parallel_workers: 4
+  timeout_minutes: 30
+  cleanup_after: true
+  notification_on_failure: true
+  notification_on_success: false
+
+# Weekly Testing Configuration  
+weekly_tests:
+  enabled: true
+  schedule: "0 8 * * 0"  # Weekly on Sunday at 8:00 AM
+  ticker_count: "all"  # All available tickers
+  parallel_workers: 8
+  timeout_minutes: 120
+  cleanup_after: true
+  notification_on_failure: true
+  notification_on_success: false
+
+# Integrity Report Configuration
+integrity_reports:
+  retention_periods:
+    daily: 30    # Keep daily reports for 30 days
+    weekly: 90   # Keep weekly reports for 90 days
+    summary: 365 # Keep summary reports for 1 year
+  
+  report_components:
+    - pipeline_metrics
+    - test_results
+    - system_health
+    - data_quality
+    - recommendations
+  
+  thresholds:
+    max_pipeline_time_minutes: 5
+    min_ticker_count: 100
+    max_error_count: 10
+    min_disk_space_gb: 10
+    max_missing_data_percentage: 50
+    max_null_percentage: 10
+    min_test_pass_rate: 90
+
+# Notification Configuration
+notifications:
+  enabled: true
+  channels:
+    - webhook
+    - email
+    - slack
+  
+  recipients:
+    daily: ["data-team@company.com"]
+    weekly: ["data-team@company.com", "engineering@company.com"]
+  
+  webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+  
+  # Email configuration (requires smtp settings)
+  email:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: "your-email@gmail.com"
+    password: "your-app-password"
+    from_address: "pipeline@company.com"
+  
+  # Slack configuration
+  slack:
+    webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+    channel: "#data-pipeline"
+    username: "Pipeline Bot"
+    icon_emoji: ":robot_face:"
+  
+  # Message templates
+  message_templates:
+    daily_failure: "🚨 Daily pipeline test failed after {runtime:.1f}s - {error}"
+    weekly_failure: "🚨 Weekly pipeline test failed after {runtime:.1f}s - {error}"
+    daily_success: "✅ Daily pipeline test completed successfully in {runtime:.1f}s"
+    weekly_success: "✅ Weekly pipeline test completed successfully in {runtime:.1f}s"
+
+# Cleanup Configuration
+cleanup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2:00 AM
+  dry_run_first: true
+  
+  targets:
+    - old_integrity_reports
+    - old_log_files
+    - old_data_partitions
+  
+  data_retention:
+    raw_data_days: 7
+    processed_data_days: 30
+    log_files_days: 90
+    cron_logs_days: 30
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+  file_rotation:
+    max_size_mb: 100
+    backup_count: 5
+  cron_logs:
+    enabled: true
+    rotation_days: 30
+    compression: true
+
+# Environment Configuration
+environment:
+  python_path: ".venv/bin/python"
+  project_root: "."
+  pipeline_mode: "prod"
+  python_unbuffered: true
+  
+  # Data paths
+  data_paths:
+    raw: "data/raw"
+    processed: "data/processed"
+    tickers: "data/tickers"
+    logs: "logs"
+    reports: "logs/integrity_reports"
+
+# Test Categories
+test_categories:
+  smoke_tests:
+    - test_metadata_validation
+    - test_data_schema_validation
+    - test_new_indicators_existence
+    - test_column_normalization
+  
+  full_tests:
+    - test_full_test_mode
+    - test_retention_cleanup
+    - test_dry_run_mode
+    - test_test_mode
+    - test_nan_handling
+    - test_drop_incomplete
+    - test_metadata_keys
+
+# Performance Configuration
+performance:
+  parallel_processing:
+    max_workers: 8
+    chunk_size: 10
+    timeout_seconds: 300
+  
+  memory_limits:
+    max_memory_gb: 8
+    gc_threshold: 0.8
+  
+  disk_usage:
+    max_disk_usage_percent: 80
+    cleanup_threshold_percent: 70 

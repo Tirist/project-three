@@ -1,0 +1,54 @@
+# Configuration for Stock Evaluation Pipeline
+
+# Data source settings
+ticker_source: "sp500"
+data_source: "wikipedia"
+
+# Path configurations
+base_data_path: "data/"
+base_log_path: "logs/"
+
+# Ticker data settings
+ticker_data_path: "tickers"
+ticker_log_path: "tickers"
+
+# OHLCV data settings
+ohlcv_data_path: "raw"
+ohlcv_log_path: "fetch"
+retention_days: 3
+
+# API settings
+api_retry_attempts: 3
+api_retry_delay: 1  # seconds
+alpha_vantage_api_key: "6CVZ0Z8NSWD386W0"  # Add your Alpha Vantage API key here
+
+# Data validation settings
+min_tickers_expected: 500
+max_tickers_expected: 510
+
+# Retention and cleanup settings
+retention_days: 30
+cleanup_enabled: true
+cleanup_log_path: "cleanup"
+
+# Rate limiting settings
+rate_limit_enabled: true
+rate_limit_strategy: "exponential_backoff"  # exponential_backoff, fixed_delay, adaptive
+max_rate_limit_hits: 10
+base_cooldown_seconds: 1
+max_cooldown_seconds: 60
+
+# Performance settings
+batch_size: 10
+performance_logging: true
+
+# Technical analysis parameters
+sma_periods: [5, 10, 20, 50, 200]
+ema_periods: [12, 26]
+rsi_period: 14
+macd_fast: 12
+macd_slow: 26
+macd_signal: 9
+bb_period: 20
+bb_std: 2
+volume_sma_period: 20 
