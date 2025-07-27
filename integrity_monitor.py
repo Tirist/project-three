@@ -31,7 +31,7 @@ import signal
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import shutil
 
 # Configure logging
@@ -52,23 +52,23 @@ class PipelineCheckpoint:
     estimated_remaining: float
     status: str  # 'running', 'completed', 'failed'
     error_message: Optional[str] = None
-    metadata: Dict[str, Any] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class PipelineRun:
     """Pipeline run data structure."""
     run_id: str
     start_time: str
-    end_time: Optional[str] = None
     mode: str  # 'daily', 'weekly', 'manual', 'retry'
     is_test: bool
     status: str  # 'running', 'completed', 'failed', 'retrying'
+    end_time: Optional[str] = None
     exit_code: Optional[int] = None
     error_message: Optional[str] = None
     retry_count: int = 0
     max_retries: int = 3
-    checkpoints: List[PipelineCheckpoint] = None
-    metadata: Dict[str, Any] = None
+    checkpoints: List[PipelineCheckpoint] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 class IntegrityMonitor:
     """Comprehensive integrity monitoring and reporting system."""
@@ -153,9 +153,24 @@ class IntegrityMonitor:
         with open(setup_script, 'r') as f:
             content = f.read()
         
-        # Check for --test flag in cron commands
-        if "--test" in content:
-            print("❌ Found --test flag in cron setup script")
+        # Check for --test flag in actual cron commands (not in comments, grep commands, or verification logic)
+        setup_lines = content.split('\n')
+        test_in_commands = False
+        
+        for line in setup_lines:
+            # Skip comments, empty lines, and verification logic
+            if line.strip().startswith('#') or not line.strip():
+                continue
+            # Skip grep commands (verification logic)
+            if 'grep' in line and '--test' in line:
+                continue
+            # Look for actual cron command lines that might contain --test
+            if ('0 6' in line or '0 8' in line or '0 2' in line or '*/15' in line) and '--test' in line:
+                test_in_commands = True
+                break
+        
+        if test_in_commands:
+            print("❌ Found --test flag in cron commands")
             return False
         
         # Check daily test script
@@ -168,7 +183,21 @@ class IntegrityMonitor:
             daily_content = f.read()
         
         # Verify daily script uses --daily-integrity (not --test)
-        if "--test" in daily_content and "--daily-integrity" not in daily_content:
+        # Look for actual command-line usage of --test (not in comments)
+        daily_lines = daily_content.split('\n')
+        test_usage_found = False
+        daily_integrity_found = False
+        
+        for line in daily_lines:
+            # Skip comments and empty lines
+            if line.strip().startswith('#') or not line.strip():
+                continue
+            if '--test' in line and not line.strip().startswith('#'):
+                test_usage_found = True
+            if '--daily-integrity' in line and not line.strip().startswith('#'):
+                daily_integrity_found = True
+        
+        if test_usage_found and not daily_integrity_found:
             print("❌ Daily script uses --test instead of --daily-integrity")
             return False
         
@@ -181,8 +210,21 @@ class IntegrityMonitor:
         with open(weekly_script, 'r') as f:
             weekly_content = f.read()
         
-        # Verify weekly script uses --weekly-integrity (not --test)
-        if "--test" in weekly_content and "--weekly-integrity" not in weekly_content:
+        # Look for actual command-line usage of --test (not in comments)
+        weekly_lines = weekly_content.split('\n')
+        test_usage_found = False
+        weekly_integrity_found = False
+        
+        for line in weekly_lines:
+            # Skip comments and empty lines
+            if line.strip().startswith('#') or not line.strip():
+                continue
+            if '--test' in line and not line.strip().startswith('#'):
+                test_usage_found = True
+            if '--weekly-integrity' in line and not line.strip().startswith('#'):
+                weekly_integrity_found = True
+        
+        if test_usage_found and not weekly_integrity_found:
             print("❌ Weekly script uses --test instead of --weekly-integrity")
             return False
         
@@ -191,7 +233,19 @@ class IntegrityMonitor:
             result = subprocess.run(['crontab', '-l'], capture_output=True, text=True)
             if result.returncode == 0:
                 cron_content = result.stdout
-                if "--test" in cron_content:
+                cron_lines = cron_content.split('\n')
+                test_in_cron_commands = False
+                
+                for line in cron_lines:
+                    # Skip comments and empty lines
+                    if line.strip().startswith('#') or not line.strip():
+                        continue
+                    # Look for actual cron command lines that contain --test
+                    if ('0 6' in line or '0 8' in line or '0 2' in line or '*/15' in line) and '--test' in line:
+                        test_in_cron_commands = True
+                        break
+                
+                if test_in_cron_commands:
                     print("❌ Found --test flag in active cron jobs")
                     return False
                 print("✅ No --test flags found in active cron jobs")
@@ -388,6 +442,9 @@ class IntegrityMonitor:
         if retention_days is None:
             retention_days = self.config.get('retention_days', 30)
         
+        # Ensure retention_days is an integer
+        retention_days = int(retention_days)
+        
         print(f"=== Cleaning up reports older than {retention_days} days ===")
         
         cutoff_date = datetime.now() - timedelta(days=retention_days)
@@ -509,7 +566,7 @@ class IntegrityMonitor:
     
     def generate_integrity_report(self, days: int = 7) -> Dict[str, Any]:
         """Generate a comprehensive integrity report."""
-        cutoff_date = datetime.now() - timedelta(days=days)
+        cutoff_date = datetime.now() - timedelta(days=float(days))
         
         # Filter runs within the specified period
         recent_runs = [

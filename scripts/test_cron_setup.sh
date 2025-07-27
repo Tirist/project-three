@@ -29,4 +29,18 @@ for script in run_daily_tests.py run_weekly_tests.py cleanup_old_reports.py; do
     fi
 done
 
+# Verify no --test flags in automated runs
+echo "Verifying cron integrity..."
+if grep -q "--test" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_daily_tests.py" && ! grep -q "--daily-integrity" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_daily_tests.py"; then
+    echo "❌ Daily script contains --test flag"
+    exit 1
+fi
+
+if grep -q "--test" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_weekly_tests.py" && ! grep -q "--weekly-integrity" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_weekly_tests.py"; then
+    echo "❌ Weekly script contains --test flag"
+    exit 1
+fi
+
+echo "✅ Cron integrity verified - no --test flags in automated runs"
+
 echo "✅ All tests passed - cron setup is ready!"
