@@ -11,6 +11,7 @@ import subprocess
 import sys
 import argparse
 import os
+from progress import get_progress_tracker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -95,202 +96,187 @@ class FeatureProcessor:
         rows_dropped = rows_before - len(df)
         return df, rows_dropped
 
-    def run(self, sample=False, test_mode=False):
+    def get_latest_raw_data(self, test_mode=False):
+        """Get the latest raw data directory."""
+        if test_mode:
+            raw_base_path = Path("data/test/raw")
+        else:
+            raw_base_path = self.raw_path
+        
+        if not raw_base_path.exists():
+            raise FileNotFoundError(f"Raw data directory not found: {raw_base_path}")
+        
+        # Find all dt=* directories and get the latest one
+        partitions = [d for d in raw_base_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
+        if not partitions:
+            raise FileNotFoundError(f"No raw data partitions found in {raw_base_path}")
+        
+        latest_partition = max(partitions, key=lambda x: x.name)
+        logging.info(f"Found latest raw data partition: {latest_partition}")
+        return latest_partition
+
+    def create_output_paths(self, date_str, test_mode=False):
+        """Create output paths for processed data and metadata."""
+        if test_mode:
+            processed_path = Path("data/test/processed") / f"dt={date_str}"
+            metadata_path = Path("logs/test/features") / f"dt={date_str}"
+        else:
+            processed_path = self.processed_path / f"dt={date_str}"
+            metadata_path = self.metadata_path / f"dt={date_str}"
+        
+        processed_path.mkdir(parents=True, exist_ok=True)
+        metadata_path.mkdir(parents=True, exist_ok=True)
+        
+        return processed_path, metadata_path
+
+    def run(self, test_mode=False, drop_incomplete=False):
         import time
         start_time = time.time()
-        # Set mode to 'test' if test_mode or sample is True
-        if test_mode or sample:
-            self.mode = 'test'
-        # Print banner for mode
-        if self.mode == 'prod':
-            print("\n==================== PROD MODE ====================\n")
-        elif self.mode == 'test':
-            print("\n==================== TEST MODE ====================\n")
-        else:
-            logging.warning(f"[PIPELINE MODE] Unknown mode: {self.mode}")
-        today_str = datetime.now().strftime("dt=%Y-%m-%d")
-        input_dir = self.raw_path / today_str
-        output_dir = self.processed_path / today_str
-        output_dir.mkdir(parents=True, exist_ok=True)
-        log_dir = Path("logs/features") / today_str
-        log_dir.mkdir(parents=True, exist_ok=True)
-        metadata_path = log_dir / "metadata.json"
-        # Guarantee mock output if no raw CSVs exist
-        if not input_dir.exists() or not list(input_dir.glob("*.csv")):
-            if self.mode == 'test':
-                # Always create output_dir
-                output_dir.mkdir(parents=True, exist_ok=True)
-                # Write a dummy features.parquet
-                dummy_df = pd.DataFrame([{
-                    'ticker': 'MOCK',
-                    'date': pd.Timestamp.now(),
-                    'open': 100.0,
-                    'high': 101.0,
-                    'low': 99.0,
-                    'close': 100.5,
-                    'volume': 1000,
-                    'sma_50': 100.0,
-                    'sma_200': 100.0,
-                    'ema_26': 100.0,
-                    'macd': 0.0,
-                    'macd_signal': 0.0,
-                    'macd_histogram': 0.0
-                }])
-                features_path = output_dir / "features.parquet"
-                dummy_df.to_parquet(features_path, index=False)
-                # Write a valid metadata.json
-                log_dir = Path("logs/features") / today_str
-                log_dir.mkdir(parents=True, exist_ok=True)
-                metadata_path = log_dir / "metadata.json"
-                mock_metadata = {
-                    "run_date": datetime.now().strftime("%Y-%m-%d"),
-                    "tickers_processed": 1,
-                    "tickers_successful": 1,
-                    "tickers_failed": 0,
-                    "features_generated": True,
-                    "status": "success",
-                    "runtime_seconds": 0.01,
-                    "runtime_minutes": 0.0002,
-                    "error_message": "",
-                    "data_path": str(features_path),
-                    "metadata_path": str(metadata_path),
-                    "test_mode": True,
-                    "dry_run_mode": False,
-                    "tickers_with_insufficient_data": [],
-                    "rows_dropped_due_to_nans": 0,
-                    "features_computed": [
-                        "sma_50", "sma_200", "ema_26", "macd", "macd_signal", "macd_histogram"
-                    ]
-                }
-                with open(metadata_path, "w") as f:
-                    json.dump(mock_metadata, f, indent=2)
-                logging.info(f"[TEST MODE] Generated mock features.parquet and metadata.json in {output_dir}")
-                # Verify both files exist
-                if not features_path.exists() or not metadata_path.exists():
-                    raise RuntimeError(f"[TEST MODE] Failed to create required test outputs: {features_path}, {metadata_path}")
-                return
-            else:
-                logging.error(f"No raw data found in {input_dir}")
-                return
-        all_files = list(input_dir.glob("*.csv"))
-        if sample and self.mode != 'prod':
-            all_files = all_files[:5]
-            logging.info(f"[SAMPLE MODE] Processing {len(all_files)} tickers.")
-        tickers_with_insufficient_data = []
-        rows_dropped_total = 0
-        features_computed = []
-        combined_df = []
-        for csv_file in all_files:
-            df = pd.read_csv(csv_file)
-            if len(df) < 500:
-                tickers_with_insufficient_data.append(csv_file.stem)
-                continue
-            df, rows_dropped = self.add_features(df, ticker=csv_file.stem)
-            if df is None:
-                tickers_with_insufficient_data.append(csv_file.stem)
-                continue
-            rows_dropped_total += rows_dropped
-            features_computed = [c for c in df.columns if c not in ["date", "ticker"]]
-            combined_df.append(df)
-        runtime_seconds = time.time() - start_time
-        runtime_minutes = runtime_seconds / 60.0
-        error_message = ""
-        status = "success"
-        features_generated = bool(combined_df)
-        if combined_df:
-            final_df = pd.concat(combined_df)
-            final_df.columns = [c.lower() for c in final_df.columns]
-            rows_before = len(final_df)
-            final_df = final_df.dropna().copy()
-            rows_dropped_total += (rows_before - len(final_df))
-            final_df.to_parquet(output_dir / "features.parquet", index=False)
-        else:
-            status = "no_data"
-            error_message = "No tickers processed."
-        # If in test mode and no tickers were processed, write dummy outputs
-        if self.mode == 'test' and not combined_df:
-            output_dir.mkdir(parents=True, exist_ok=True)
-            dummy_df = pd.DataFrame([{
-                'ticker': 'MOCK',
-                'date': pd.Timestamp.now(),
-                'open': 100.0,
-                'high': 101.0,
-                'low': 99.0,
-                'close': 100.5,
-                'volume': 1000,
-                'sma_50': 100.0,
-                'sma_200': 100.0,
-                'ema_26': 100.0,
-                'macd': 0.0,
-                'macd_signal': 0.0,
-                'macd_histogram': 0.0
-            }])
-            features_path = output_dir / "features.parquet"
-            dummy_df.to_parquet(features_path, index=False)
-            log_dir = Path("logs/features") / today_str
-            log_dir.mkdir(parents=True, exist_ok=True)
-            metadata_path = log_dir / "metadata.json"
-            mock_metadata = {
-                "run_date": datetime.now().strftime("%Y-%m-%d"),
-                "tickers_processed": 1,
-                "tickers_successful": 1,
-                "tickers_failed": 0,
-                "features_generated": True,
-                "status": "success",
-                "runtime_seconds": 0.01,
-                "runtime_minutes": 0.0002,
-                "error_message": "",
-                "data_path": str(features_path),
-                "metadata_path": str(metadata_path),
-                "test_mode": True,
-                "dry_run_mode": False,
-                "tickers_with_insufficient_data": [],
-                "rows_dropped_due_to_nans": 0,
-                "features_computed": [
-                    "sma_50", "sma_200", "ema_26", "macd", "macd_signal", "macd_histogram"
-                ]
+        
+        # Get latest raw data
+        try:
+            latest_raw = self.get_latest_raw_data(test_mode)
+            date_str = latest_raw.name[3:]  # Remove "dt=" prefix
+        except FileNotFoundError as e:
+            logging.error(f"Could not find raw data: {e}")
+            return False
+        
+        # Create output paths
+        processed_path, metadata_path = self.create_output_paths(date_str, test_mode)
+        
+        # Get all CSV files in the raw data directory
+        csv_files = list(latest_raw.glob("*.csv"))
+        if not csv_files:
+            logging.error(f"No CSV files found in {latest_raw}")
+            return False
+        
+        logging.info(f"Found {len(csv_files)} CSV files to process")
+        
+        # Apply test mode limitations
+        if test_mode:
+            # Limit to 5 files for test mode
+            csv_files = csv_files[:5]
+            logging.info(f"[TEST MODE] Processing only 5 files: {[f.stem for f in csv_files]}")
+        
+        # Process files with progress tracking
+        show_progress = self.config.get("progress", True)
+        with get_progress_tracker(
+            total=len(csv_files), 
+            desc="Processing features", 
+            unit="file",
+            disable=not show_progress
+        ) as progress:
+            
+            processed_data = []
+            failed_tickers = []
+            total_rows_dropped = 0
+            
+            for csv_file in csv_files:
+                ticker = csv_file.stem
+                try:
+                    # Load data
+                    df = pd.read_csv(csv_file)
+                    
+                    # Add features
+                    processed_df, rows_dropped = self.add_features(df, ticker)
+                    
+                    if processed_df is not None:
+                        processed_data.append(processed_df)
+                        total_rows_dropped += rows_dropped
+                        logging.info(f"Processed {ticker}: {len(processed_df)} rows (dropped {rows_dropped})")
+                    else:
+                        failed_tickers.append(ticker)
+                        logging.warning(f"Failed to process {ticker}")
+                        
+                except Exception as e:
+                    failed_tickers.append(ticker)
+                    logging.error(f"Error processing {ticker}: {e}")
+                
+                progress.update(1, postfix={"current": ticker})
+            
+            # Combine all processed data
+            if not processed_data:
+                logging.error("No data was successfully processed")
+                return False
+            
+            combined_df = pd.concat(processed_data, ignore_index=True)
+            
+            # Drop incomplete tickers if requested
+            if drop_incomplete:
+                min_rows = self.config.get("min_rows_per_ticker", 500)
+                ticker_counts = combined_df['ticker'].value_counts()
+                valid_tickers = ticker_counts[ticker_counts >= min_rows].index.tolist()
+                combined_df = combined_df[combined_df['ticker'].isin(valid_tickers)]
+                dropped_tickers = set(ticker_counts.index.tolist()) - set(valid_tickers)
+                if dropped_tickers:
+                    logging.info(f"Dropped {len(dropped_tickers)} tickers with <{min_rows} rows: {dropped_tickers}")
+            
+            # Save processed data
+            output_file = processed_path / "features.parquet"
+            combined_df.to_parquet(output_file, index=False)
+            
+            # Save metadata
+            metadata = {
+                "processing_date": datetime.now().isoformat(),
+                "raw_data_date": date_str,
+                "files_processed": len(csv_files),
+                "tickers_processed": len(processed_data),
+                "tickers_failed": len(failed_tickers),
+                "total_rows": len(combined_df),
+                "rows_dropped": total_rows_dropped,
+                "failed_tickers": failed_tickers,
+                "test_mode": test_mode,
+                "drop_incomplete": drop_incomplete,
+                "output_file": str(output_file)
             }
-            with open(metadata_path, "w") as f:
-                json.dump(mock_metadata, f, indent=2)
-            logging.info(f"[TEST MODE] Generated mock features.parquet and metadata.json in {output_dir}")
-            if not features_path.exists() or not metadata_path.exists():
-                raise RuntimeError(f"[TEST MODE] Failed to create required test outputs: {features_path}, {metadata_path}")
-            return
-        metadata = {
-            "run_date": datetime.now().strftime("%Y-%m-%d"),
-            "tickers_processed": len(all_files),
-            "tickers_successful": len(all_files) - len(tickers_with_insufficient_data),
-            "tickers_failed": len(tickers_with_insufficient_data),
-            "features_generated": features_generated,
-            "status": status,
-            "runtime_seconds": runtime_seconds,
-            "runtime_minutes": runtime_minutes,
-            "error_message": error_message,
-            "data_path": str(output_dir / "features.parquet"),
-            "metadata_path": str(metadata_path),
-            "test_mode": self.mode == 'test',
-            "dry_run_mode": False,
-            "tickers_with_insufficient_data": tickers_with_insufficient_data,
-            "rows_dropped_due_to_nans": rows_dropped_total,
-            "features_computed": features_computed
-        }
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-        if features_generated:
-            logging.info(f"Processed {len(combined_df)} tickers. Features saved to {output_dir}")
-        else:
-            logging.warning("No tickers processed.")
+            
+            metadata_file = metadata_path / "metadata.json"
+            with open(metadata_file, 'w') as f:
+                json.dump(metadata, f, indent=2)
+            
+            runtime = time.time() - start_time
+            logging.info(f"Feature processing completed in {runtime:.2f} seconds")
+            logging.info(f"Processed {len(processed_data)} tickers, {len(combined_df)} total rows")
+            logging.info(f"Output saved to: {output_file}")
+            
+            return True
+
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config/settings.yaml", help="Path to config file")
-    parser.add_argument("--sample", action="store_true", help="Process a sample of tickers")
-    parser.add_argument("--drop-incomplete", action="store_true", help="Drop tickers with <500 rows")
-    parser.add_argument("--dry-run", action="store_true", help="Run without writing output")
-    parser.add_argument("--test-mode", action="store_true", help="Run in test mode (always generate mock output if no data)")
+    parser = argparse.ArgumentParser(description="Process OHLCV data and add technical indicators")
+    parser.add_argument("--test-mode", action="store_true", help="Run in test mode (limited files, test directories)")
+    parser.add_argument("--drop-incomplete", action="store_true", help="Drop tickers with insufficient data")
+    parser.add_argument("--config", default="config/settings.yaml", help="Path to configuration file")
+    parser.add_argument("--progress", action="store_true", help="Show progress bar (enabled by default for full runs)")
+    parser.add_argument("--no-progress", action="store_true", help="Disable progress bar")
+    
     args = parser.parse_args()
-    processor = FeatureProcessor(config_path=args.config)
-    processor.run(sample=args.sample, test_mode=args.test_mode)
+    
+    processor = FeatureProcessor(args.config)
+    
+    # Progress configuration
+    if args.no_progress:
+        processor.config['progress'] = False
+    elif args.progress:
+        processor.config['progress'] = True
+    else:
+        # Default: enable progress for full runs, disable for test mode
+        processor.config['progress'] = not args.test_mode
+    
+    # Test mode configuration
+    if args.test_mode:
+        processor.config['test_mode'] = True
+        print("[TEST MODE] Processing limited files for testing.")
+    
+    success = processor.run(test_mode=args.test_mode, drop_incomplete=args.drop_incomplete)
+    
+    if success:
+        print("Feature processing completed successfully!")
+        sys.exit(0)
+    else:
+        print("Feature processing failed!")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

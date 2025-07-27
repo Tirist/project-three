@@ -46,7 +46,10 @@ def generate_integrity_report(test_results, pipeline_metrics, report_type="daily
     }
     
     # Add recommendations based on results
-    if test_results.get("failed_tests", 0) > 0:
+    failed_tests = test_results.get("failed_tests", [])
+    if isinstance(failed_tests, list) and len(failed_tests) > 0:
+        report["recommendations"].append("Investigate failed tests")
+    elif isinstance(failed_tests, int) and failed_tests > 0:
         report["recommendations"].append("Investigate failed tests")
     if pipeline_metrics.get("total_time", 0) > 300:  # 5 minutes
         report["recommendations"].append("Pipeline runtime exceeded threshold")
@@ -116,12 +119,21 @@ def save_integrity_report(report, report_type="daily"):
     logging.info(f"Integrity report saved to: {report_file}")
     return report_file
 
-def clean_pipeline_data():
+def clean_pipeline_data(test_mode=False):
     """Delete data/processed/* and logs/features/* for a fresh test run."""
-    dirs_to_clean = [
-        Path('data/processed'),
-        Path('logs/features'),
-    ]
+    if test_mode:
+        # Clean test directories only
+        dirs_to_clean = [
+            Path('data/test/processed'),
+            Path('logs/test/features'),
+        ]
+    else:
+        # Clean production directories
+        dirs_to_clean = [
+            Path('data/processed'),
+            Path('logs/features'),
+        ]
+    
     for d in dirs_to_clean:
         if d.exists():
             logging.info(f"Cleaning directory: {d}")
@@ -210,26 +222,33 @@ def main():
         args.report_type = "weekly"
         print("\n=== WEEKLY INTEGRITY CHECK ===")
 
+    # Determine if we're in test mode
+    test_mode = args.test or args.daily_integrity
+
     # PROD MODE BANNER
     if args.prod:
         print("\n=== PROD RUN START ===\n")
         print("==================== PROD MODE ====================\n")
         print("[PROD] Cleaning all processed and log data before run.")
-        clean_pipeline_data()
-    elif args.force_clean or (args.test and not args.no_clean):
-        print("\n=== Cleaning pipeline data (processed, logs) ===\n")
-        clean_pipeline_data()
+        clean_pipeline_data(test_mode=False)
+    elif args.force_clean or (test_mode and not args.no_clean):
+        print(f"\n=== Cleaning pipeline data ({'test' if test_mode else 'production'}) ===\n")
+        clean_pipeline_data(test_mode=test_mode)
 
-    # 1. fetch_tickers.py
+    # 1. fetch_tickers.py - Always fetch full ticker list by default
     ticker_cmd = [sys.executable, 'fetch_tickers.py', '--force', '--progress']
     if args.prod:
+        # Production mode: full ticker pull, no test flags
         if '--force' not in ticker_cmd:
             ticker_cmd.append('--force')
-        pass  # No --test or --sample in prod
     elif args.full_test:
+        # Full test mode: full ticker pull with validation
         ticker_cmd.append('--full-test')
-    elif args.test:
+    elif test_mode:
+        # Test mode: limited tickers, test directories
         ticker_cmd.append('--test')
+    # Note: No --test flag means full ticker pull by default
+    
     ticker_ok, t_time = True, 0
     if not (args.prod and args.skip_fetch):
         ticker_ok, t_time = run_cmd(ticker_cmd, desc='fetch_tickers')
@@ -245,12 +264,15 @@ def main():
     # 2. fetch_data.py
     data_cmd = [sys.executable, 'fetch_data.py', '--progress']
     if args.prod:
+        # Production mode: full data fetch
         if '--force' not in data_cmd:
             data_cmd.append('--force')
-        pass
-    elif args.test:
+    elif test_mode:
+        # Test mode: limited data fetch
         data_cmd.append('--test')
         data_cmd += ['--cooldown', '1']
+    # Note: No --test flag means full data fetch by default
+    
     if args.parallel:
         data_cmd += ['--parallel', str(args.parallel)]
     data_ok, d_time = True, 0
@@ -268,9 +290,13 @@ def main():
     # 3. process_features.py
     features_cmd = [sys.executable, 'process_features.py']
     if args.prod:
+        # Production mode: full processing
         pass
-    elif args.test:
+    elif test_mode:
+        # Test mode: test processing
         features_cmd.append('--test-mode')
+    # Note: No --test flag means full processing by default
+    
     if args.drop_incomplete:
         features_cmd.append('--drop-incomplete')
     features_ok, f_time = run_cmd(features_cmd, desc='process_features')
@@ -279,11 +305,18 @@ def main():
         failed_steps.append('process_features.py')
         errors.append('process_features.py failed')
     success &= features_ok
+    
     # Validation: check for features.parquet and metadata.json
     from datetime import datetime
     today_str = datetime.now().strftime('dt=%Y-%m-%d')
-    features_path = Path('data/processed') / today_str / 'features.parquet'
-    metadata_path = Path('logs/features') / today_str / 'metadata.json'
+    
+    if test_mode:
+        features_path = Path('data/test/processed') / today_str / 'features.parquet'
+        metadata_path = Path('logs/test/features') / today_str / 'metadata.json'
+    else:
+        features_path = Path('data/processed') / today_str / 'features.parquet'
+        metadata_path = Path('logs/features') / today_str / 'metadata.json'
+    
     if features_path.exists() and metadata_path.exists():
         print(f"[VALIDATION] features.parquet and metadata.json found for {today_str}")
     else:
@@ -306,7 +339,7 @@ def main():
         test_cmd = [sys.executable, '-m', 'pytest', '-v', '-n', 'auto', '--dist=loadscope']
         if args.full_test:
             print("[INFO] Running full test suite including heavy tests. This may take several minutes...")
-        elif args.test:
+        elif test_mode:
             print("[INFO] Running quick test suite (heavy tests skipped).")
             test_cmd.extend(['-m', 'quick'])
         test_ok, test_time = run_cmd(test_cmd, desc='run_all_tests')
@@ -329,7 +362,8 @@ def main():
             "test_time": test_time,
             "success": success,
             "failed_steps": failed_steps,
-            "errors": errors
+            "errors": errors,
+            "test_mode": test_mode
         }
         
         # Try to parse test results from pytest output
@@ -355,11 +389,17 @@ def main():
     if not args.prod:
         print(f"run_all_tests.py:     {'PASS' if summary.get('run_all_tests', True) else 'FAIL'} ({test_time:.1f}s)")
     print(f"Total pipeline time:  {total_time:.1f} seconds")
+    
     # Print ticker/row summary if possible
     try:
         from glob import glob
         import pandas as pd
-        latest_dirs = sorted(Path('data/processed').glob('dt=*'), reverse=True)
+        
+        if test_mode:
+            latest_dirs = sorted(Path('data/test/processed').glob('dt=*'), reverse=True)
+        else:
+            latest_dirs = sorted(Path('data/processed').glob('dt=*'), reverse=True)
+            
         if latest_dirs:
             parquet_file = latest_dirs[0] / 'features.parquet'
             if parquet_file.exists():
@@ -370,14 +410,18 @@ def main():
                 print(f"Total rows processed: {n_rows}")
     except Exception as e:
         print(f"[WARN] Could not summarize output: {e}")
+    
     if args.prod:
         print(f"Errors: {errors if errors else 'None'}")
         print("\n=== PROD RUN COMPLETE ===\n")
         sys.exit(0)
     if args.full_test:
         print("Test mode: FULL (all tests including heavy tests)")
-    elif args.test:
+    elif test_mode:
         print("Test mode: QUICK (smoke/quick tests only)")
+    else:
+        print("Mode: PRODUCTION (full data processing)")
+    
     if success:
         print("\n🎉 Pipeline completed successfully and all tests passed!")
         sys.exit(0)

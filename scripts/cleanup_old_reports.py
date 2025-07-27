@@ -8,6 +8,7 @@ Removes reports older than specified retention periods.
 Usage:
     python scripts/cleanup_old_reports.py
     python scripts/cleanup_old_reports.py --dry-run
+    python scripts/cleanup_old_reports.py --test
 """
 
 import argparse
@@ -42,9 +43,10 @@ def load_config() -> Dict[str, Any]:
         logging.error(f"Failed to load configuration: {e}")
         sys.exit(1)
 
-def cleanup_reports(dry_run=False) -> tuple[int, int]:
+def cleanup_reports(dry_run=False, test_mode=False) -> tuple[int, int]:
     """Clean up old integrity reports."""
-    print("=== Cleaning Up Old Integrity Reports ===")
+    mode_str = "TEST" if test_mode else "PRODUCTION"
+    print(f"=== Cleaning Up Old Integrity Reports ({mode_str}) ===")
     
     # Load configuration
     config = load_config()
@@ -54,9 +56,14 @@ def cleanup_reports(dry_run=False) -> tuple[int, int]:
         'summary': 365
     })
     
-    reports_dir = Path("logs/integrity_reports")
+    # Determine base directory based on test mode
+    if test_mode:
+        reports_dir = Path("logs/test/integrity_reports")
+    else:
+        reports_dir = Path("logs/integrity_reports")
+    
     if not reports_dir.exists():
-        print("No integrity reports directory found")
+        print(f"No integrity reports directory found: {reports_dir}")
         return 0, 0
     
     total_deleted = 0
@@ -97,7 +104,57 @@ def cleanup_reports(dry_run=False) -> tuple[int, int]:
     
     return total_deleted, total_size_freed
 
-def generate_cleanup_report(deleted_count: int, size_freed: int, config: Dict[str, Any]) -> None:
+def cleanup_test_data(dry_run=False) -> tuple[int, int]:
+    """Clean up test data directories."""
+    print("=== Cleaning Up Test Data ===")
+    
+    test_dirs = [
+        Path("data/test"),
+        Path("logs/test")
+    ]
+    
+    total_deleted = 0
+    total_size_freed = 0
+    
+    for test_dir in test_dirs:
+        if not test_dir.exists():
+            continue
+        
+        print(f"\nCleaning {test_dir}")
+        
+        # Remove all contents of test directories
+        for item in test_dir.rglob("*"):
+            if item.is_file():
+                try:
+                    file_size = item.stat().st_size
+                    if dry_run:
+                        print(f"  [DRY RUN] Would delete: {item} ({file_size} bytes)")
+                    else:
+                        item.unlink()
+                        print(f"  Deleted: {item} ({file_size} bytes)")
+                        total_deleted += 1
+                        total_size_freed += file_size
+                except Exception as e:
+                    print(f"  Error deleting {item}: {e}")
+            elif item.is_dir():
+                try:
+                    if dry_run:
+                        print(f"  [DRY RUN] Would delete directory: {item}")
+                    else:
+                        import shutil
+                        shutil.rmtree(item)
+                        print(f"  Deleted directory: {item}")
+                except Exception as e:
+                    print(f"  Error deleting directory {item}: {e}")
+    
+    if dry_run:
+        print(f"\n[DRY RUN] Would delete {total_deleted} files, freeing {total_size_freed} bytes")
+    else:
+        print(f"\nDeleted {total_deleted} files, freed {total_size_freed} bytes")
+    
+    return total_deleted, total_size_freed
+
+def generate_cleanup_report(deleted_count: int, size_freed: int, config: Dict[str, Any], test_mode: bool = False) -> None:
     """Generate a cleanup report."""
     retention_periods = config.get('integrity_reports', {}).get('retention_periods', {})
     
@@ -105,11 +162,16 @@ def generate_cleanup_report(deleted_count: int, size_freed: int, config: Dict[st
         "cleanup_date": datetime.now().isoformat(),
         "files_deleted": deleted_count,
         "bytes_freed": size_freed,
-        "retention_policy": retention_periods
+        "retention_policy": retention_periods,
+        "test_mode": test_mode
     }
     
     # Save cleanup report
-    cleanup_dir = Path("logs/integrity_reports/summary")
+    if test_mode:
+        cleanup_dir = Path("logs/test/integrity_reports/summary")
+    else:
+        cleanup_dir = Path("logs/integrity_reports/summary")
+    
     cleanup_dir.mkdir(parents=True, exist_ok=True)
     
     today = datetime.now().strftime("%Y-%m-%d")
@@ -123,8 +185,10 @@ def generate_cleanup_report(deleted_count: int, size_freed: int, config: Dict[st
         print(f"Warning: Could not save cleanup report: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Clean up old integrity reports")
+    parser = argparse.ArgumentParser(description="Clean up old integrity reports and test data")
     parser.add_argument('--dry-run', action='store_true', help='Show what would be deleted without actually deleting')
+    parser.add_argument('--test', action='store_true', help='Clean up test data directories')
+    parser.add_argument('--test-only', action='store_true', help='Only clean up test data, skip integrity reports')
     
     args = parser.parse_args()
     
@@ -133,8 +197,22 @@ def main():
     
     try:
         config = load_config()
-        deleted_count, size_freed = cleanup_reports(args.dry_run)
-        generate_cleanup_report(deleted_count, size_freed, config)
+        total_deleted = 0
+        total_size_freed = 0
+        
+        # Clean up integrity reports (unless test-only mode)
+        if not args.test_only:
+            deleted_count, size_freed = cleanup_reports(args.dry_run, args.test)
+            total_deleted += deleted_count
+            total_size_freed += size_freed
+        
+        # Clean up test data if requested
+        if args.test or args.test_only:
+            deleted_count, size_freed = cleanup_test_data(args.dry_run)
+            total_deleted += deleted_count
+            total_size_freed += size_freed
+        
+        generate_cleanup_report(total_deleted, total_size_freed, config, args.test)
         print("✅ Cleanup completed successfully")
         return 0
     except Exception as e:
