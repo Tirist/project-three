@@ -210,6 +210,39 @@ def main():
     errors = []
     test_results = {"passed": 0, "failed": 0, "failed_tests": []}
 
+    # Initialize integrity monitoring
+    run_id = None
+    monitor = None
+    try:
+        from integrity_monitor import IntegrityMonitor
+        monitor = IntegrityMonitor()
+        
+        # Determine run mode
+        if args.daily_integrity:
+            mode = "daily"
+            is_test = True
+        elif args.weekly_integrity:
+            mode = "weekly"
+            is_test = False
+        elif args.test:
+            mode = "manual_test"
+            is_test = True
+        elif args.prod:
+            mode = "production"
+            is_test = False
+        else:
+            mode = "manual_full"
+            is_test = False
+        
+        # Start pipeline run tracking
+        run_id = monitor.start_pipeline_run(mode, is_test)
+        print(f"Pipeline run started: {run_id}")
+        
+    except ImportError:
+        print("Warning: integrity_monitor not available - checkpoint logging disabled")
+    except Exception as e:
+        print(f"Warning: Could not initialize integrity monitor: {e}")
+
     # Handle integrity modes
     if args.daily_integrity:
         args.test = True
@@ -235,6 +268,10 @@ def main():
         print(f"\n=== Cleaning pipeline data ({'test' if test_mode else 'production'}) ===\n")
         clean_pipeline_data(test_mode=test_mode)
 
+    # Log checkpoint for cleanup
+    if monitor and run_id:
+        monitor.log_checkpoint(run_id, "cleanup", 0, 1, time.time() - start_time)
+
     # 1. fetch_tickers.py - Always fetch full ticker list by default
     ticker_cmd = [sys.executable, 'fetch_tickers.py', '--force', '--progress']
     if args.prod:
@@ -257,6 +294,12 @@ def main():
             failed_steps.append('fetch_tickers.py')
             errors.append('fetch_tickers.py failed')
         success &= ticker_ok
+        
+        # Log checkpoint for ticker fetch
+        if monitor and run_id:
+            monitor.log_checkpoint(run_id, "fetch_tickers", 1 if ticker_ok else 0, 1, time.time() - start_time, 
+                                 "completed" if ticker_ok else "failed", 
+                                 None if ticker_ok else "fetch_tickers.py failed")
     else:
         print("[PROD] Skipping fetch_tickers.py (skip-fetch enabled)")
         summary['fetch_tickers'] = True
@@ -283,6 +326,12 @@ def main():
             failed_steps.append('fetch_data.py')
             errors.append('fetch_data.py failed')
         success &= data_ok
+        
+        # Log checkpoint for data fetch
+        if monitor and run_id:
+            monitor.log_checkpoint(run_id, "fetch_data", 2 if data_ok else 1, 2, time.time() - start_time,
+                                 "completed" if data_ok else "failed",
+                                 None if data_ok else "fetch_data.py failed")
     else:
         print("[PROD] Skipping fetch_data.py (skip-fetch enabled)")
         summary['fetch_data'] = True
@@ -305,6 +354,12 @@ def main():
         failed_steps.append('process_features.py')
         errors.append('process_features.py failed')
     success &= features_ok
+    
+    # Log checkpoint for feature processing
+    if monitor and run_id:
+        monitor.log_checkpoint(run_id, "process_features", 3 if features_ok else 2, 3, time.time() - start_time,
+                             "completed" if features_ok else "failed",
+                             None if features_ok else "process_features.py failed")
     
     # Validation: check for features.parquet and metadata.json
     from datetime import datetime
@@ -348,8 +403,25 @@ def main():
             failed_steps.append('run_all_tests.py')
             errors.append('run_all_tests.py failed')
         success &= test_ok
+        
+        # Log checkpoint for testing
+        if monitor and run_id:
+            monitor.log_checkpoint(run_id, "testing", 4 if test_ok else 3, 4, time.time() - start_time,
+                                 "completed" if test_ok else "failed",
+                                 None if test_ok else "run_all_tests.py failed")
 
     total_time = time.time() - start_time
+    
+    # End pipeline run tracking
+    if monitor and run_id:
+        exit_code = 0 if success else 1
+        error_message = "; ".join(errors) if errors else None
+        monitor.end_pipeline_run(run_id, exit_code, error_message)
+        
+        # Final checkpoint
+        monitor.log_checkpoint(run_id, "pipeline_complete", 4, 4, total_time,
+                             "completed" if success else "failed",
+                             error_message)
     
     # Generate integrity report if requested
     if args.integrity_report:

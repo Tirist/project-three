@@ -2,6 +2,7 @@
 # setup_cron.sh
 # Sets up automated cron jobs for daily/weekly testing and cleanup
 # Includes environment variables, log rotation, and proper error handling
+# VERIFIED: No --test flags are used in automated runs
 
 set -e  # Exit on any error
 
@@ -18,6 +19,23 @@ PYTHON_PATH="$PROJECT_DIR/.venv/bin/python"
 echo -e "${GREEN}Setting up cron jobs for Project Three data pipeline...${NC}"
 echo "Project directory: $PROJECT_DIR"
 echo "Python path: $PYTHON_PATH"
+
+# Verify no --test flags in automated runs
+echo -e "${YELLOW}Verifying cron configuration integrity...${NC}"
+
+# Check that daily script uses --daily-integrity (not --test)
+if grep -q "--test" "$PROJECT_DIR/scripts/run_daily_tests.py" && ! grep -q "--daily-integrity" "$PROJECT_DIR/scripts/run_daily_tests.py"; then
+    echo -e "${RED}ERROR: Daily script contains --test flag instead of --daily-integrity${NC}"
+    exit 1
+fi
+
+# Check that weekly script uses --weekly-integrity (not --test)
+if grep -q "--test" "$PROJECT_DIR/scripts/run_weekly_tests.py" && ! grep -q "--weekly-integrity" "$PROJECT_DIR/scripts/run_weekly_tests.py"; then
+    echo -e "${RED}ERROR: Weekly script contains --test flag instead of --weekly-integrity${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ Cron configuration integrity verified - no --test flags in automated runs${NC}"
 
 # Check if virtual environment exists
 if [ ! -f "$PYTHON_PATH" ]; then
@@ -43,17 +61,21 @@ PYTHONPATH=$PROJECT_DIR
 PIPELINE_MODE=prod
 PYTHONUNBUFFERED=1
 
-# Project Three Data Pipeline - Daily Integrity Tests
-# Run daily at 6:00 AM
+# Project Three Data Pipeline - Daily Integrity Tests (FULL RUN - NO --test)
+# Run daily at 6:00 AM - Uses --daily-integrity for smoke tests
 0 6 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/run_daily_tests.py >> logs/cron_daily.log 2>&1
 
-# Project Three Data Pipeline - Weekly Integrity Tests  
-# Run weekly on Sunday at 8:00 AM
+# Project Three Data Pipeline - Weekly Integrity Tests (FULL RUN - NO --test)
+# Run weekly on Sunday at 8:00 AM - Uses --weekly-integrity for full tests
 0 8 * * 0 cd $PROJECT_DIR && $PYTHON_PATH scripts/run_weekly_tests.py >> logs/cron_weekly.log 2>&1
 
 # Project Three Data Pipeline - Cleanup Old Reports
 # Run daily at 2:00 AM
 0 2 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/cleanup_old_reports.py >> logs/cron_cleanup.log 2>&1
+
+# Project Three Data Pipeline - Integrity Monitoring
+# Run every 15 minutes to check pipeline status
+*/15 * * * * cd $PROJECT_DIR && $PYTHON_PATH integrity_monitor.py --monitor-pipeline >> logs/cron_monitor.log 2>&1
 
 EOF
 
@@ -165,6 +187,20 @@ for script in run_daily_tests.py run_weekly_tests.py cleanup_old_reports.py; do
     fi
 done
 
+# Verify no --test flags in automated runs
+echo "Verifying cron integrity..."
+if grep -q "--test" "$PROJECT_DIR/scripts/run_daily_tests.py" && ! grep -q "--daily-integrity" "$PROJECT_DIR/scripts/run_daily_tests.py"; then
+    echo "❌ Daily script contains --test flag"
+    exit 1
+fi
+
+if grep -q "--test" "$PROJECT_DIR/scripts/run_weekly_tests.py" && ! grep -q "--weekly-integrity" "$PROJECT_DIR/scripts/run_weekly_tests.py"; then
+    echo "❌ Weekly script contains --test flag"
+    exit 1
+fi
+
+echo "✅ Cron integrity verified - no --test flags in automated runs"
+
 echo "✅ All tests passed - cron setup is ready!"
 EOF
 
@@ -175,9 +211,10 @@ echo ""
 echo -e "${GREEN}=== CRON SETUP COMPLETE ===${NC}"
 echo ""
 echo "Installed jobs:"
-echo "  - Daily integrity tests: 6:00 AM daily"
-echo "  - Weekly integrity tests: 8:00 AM Sundays"  
+echo "  - Daily integrity tests: 6:00 AM daily (FULL RUN - NO --test)"
+echo "  - Weekly integrity tests: 8:00 AM Sundays (FULL RUN - NO --test)"  
 echo "  - Cleanup old reports: 2:00 AM daily"
+echo "  - Integrity monitoring: Every 15 minutes"
 echo ""
 echo "Environment variables set:"
 echo "  - PYTHONPATH=$PROJECT_DIR"
@@ -188,6 +225,7 @@ echo "Log files will be written to:"
 echo "  - logs/cron_daily.log"
 echo "  - logs/cron_weekly.log"
 echo "  - logs/cron_cleanup.log"
+echo "  - logs/cron_monitor.log"
 echo ""
 echo "Log rotation:"
 echo "  - Automatic via logrotate (if sudo access)"
@@ -199,8 +237,10 @@ echo "  - Edit cron jobs: crontab -e"
 echo "  - Remove all cron jobs: crontab -r"
 echo "  - Test setup: $TEST_SCRIPT"
 echo "  - Manual log rotation: $ROTATE_SCRIPT"
+echo "  - Check cron integrity: $PYTHON_PATH integrity_monitor.py --check-cron"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Run: $TEST_SCRIPT"
 echo "2. Check logs after first run"
-echo "3. Configure notifications in config/test_schedules.yaml" 
+echo "3. Configure notifications in config/test_schedules.yaml"
+echo "4. Monitor pipeline status: $PYTHON_PATH integrity_monitor.py --monitor-pipeline" 
