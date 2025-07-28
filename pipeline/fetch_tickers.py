@@ -25,6 +25,10 @@ import requests
 from bs4 import BeautifulSoup
 import yaml
 import sys
+from pathlib import Path
+
+# Add utils directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from progress import get_progress_tracker
 
 

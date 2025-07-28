@@ -21,6 +21,10 @@ from typing import List, Dict, Optional, Tuple, Any
 import pandas as pd
 import yaml
 import sys
+from pathlib import Path
+
+# Add utils directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from progress import get_progress_tracker
 import concurrent.futures
 
@@ -393,24 +397,20 @@ class OHLCVFetcher:
     def check_existing_partition(self, date_str: str, test_mode: bool = False) -> bool:
         """
         Check if today's partition already exists.
-        
+    
         Args:
             date_str: Date string in YYYY-MM-DD format
             test_mode: If True, check test directories
-            
+    
         Returns:
             True if partition exists, False otherwise
         """
         data_path, _ = self.create_partition_paths(date_str, test_mode)
         
         if data_path.exists():
-            # Check if there are any CSV files in the directory
+            # Check if there are any CSV files in the partition
             csv_files = list(data_path.glob("*.csv"))
-            if csv_files:
-                logging.info(f"Partition already exists with {len(csv_files)} files: {data_path}")
-                return True
-        
-        logging.info(f"Partition does not exist: {data_path}")
+            return len(csv_files) > 0
         return False
     
     def cleanup_old_partitions(self, dry_run: bool = False, test_mode: bool = False) -> Dict:
@@ -679,6 +679,7 @@ class OHLCVFetcher:
                 "tickers_processed": len(tickers_to_process),
                 "tickers_successful": len(successful_tickers),
                 "tickers_failed": len(failed_tickers),
+                "skipped_tickers": 0,  # No tickers are skipped in this implementation
                 "status": "success",
                 "runtime_seconds": round(runtime, 2),
                 "runtime_minutes": round(runtime / 60, 2),

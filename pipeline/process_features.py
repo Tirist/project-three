@@ -11,6 +11,9 @@ import subprocess
 import sys
 import argparse
 import os
+
+# Add utils directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from progress import get_progress_tracker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -215,17 +218,33 @@ class FeatureProcessor:
             output_file = processed_path / "features.parquet"
             combined_df.to_parquet(output_file, index=False)
             
+            # Calculate runtime
+            runtime = time.time() - start_time
+            
             # Save metadata
             metadata = {
+                "run_date": datetime.now().strftime('%Y-%m-%d'),
                 "processing_date": datetime.now().isoformat(),
                 "raw_data_date": date_str,
                 "files_processed": len(csv_files),
                 "tickers_processed": len(processed_data),
+                "tickers_successful": len(processed_data),
                 "tickers_failed": len(failed_tickers),
+                "features_generated": len(combined_df.columns) - 7,  # Subtract base columns (date, ticker, open, high, low, close, volume)
                 "total_rows": len(combined_df),
                 "rows_dropped": total_rows_dropped,
+                "tickers_with_insufficient_data": 0,  # Will be calculated if drop_incomplete is used
+                "rows_dropped_due_to_nans": total_rows_dropped,
+                "features_computed": len(combined_df.columns) - 7,
                 "failed_tickers": failed_tickers,
+                "status": "success" if len(failed_tickers) == 0 else "partial_success",
+                "runtime_seconds": runtime,
+                "runtime_minutes": runtime / 60,
+                "error_message": None if len(failed_tickers) == 0 else f"Failed to process {len(failed_tickers)} tickers",
+                "data_path": str(processed_path),
+                "metadata_path": str(metadata_path / "metadata.json"),
                 "test_mode": test_mode,
+                "dry_run_mode": False,
                 "drop_incomplete": drop_incomplete,
                 "output_file": str(output_file)
             }

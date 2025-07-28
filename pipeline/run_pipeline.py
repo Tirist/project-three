@@ -27,6 +27,11 @@ import json
 from pathlib import Path
 from datetime import datetime, timedelta
 
+# Import common utilities
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from common import PipelineConfig, DataManager, LogManager, format_time
+from logger import get_logger, get_structured_logger
+
 LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
@@ -214,6 +219,7 @@ def main():
     run_id = None
     monitor = None
     try:
+        sys.path.insert(0, str(Path(__file__).parent / "utils"))
         from integrity_monitor import IntegrityMonitor
         monitor = IntegrityMonitor()
         
@@ -273,7 +279,7 @@ def main():
         monitor.log_checkpoint(run_id, "cleanup", 0, 1, time.time() - start_time)
 
     # 1. fetch_tickers.py - Always fetch full ticker list by default
-    ticker_cmd = [sys.executable, 'fetch_tickers.py', '--force', '--progress']
+    ticker_cmd = [sys.executable, 'pipeline/fetch_tickers.py', '--force', '--progress']
     if args.prod:
         # Production mode: full ticker pull, no test flags
         if '--force' not in ticker_cmd:
@@ -293,31 +299,29 @@ def main():
         if not ticker_ok:
             failed_steps.append('fetch_tickers.py')
             errors.append('fetch_tickers.py failed')
-        success &= ticker_ok
-        
-        # Log checkpoint for ticker fetch
-        if monitor and run_id:
-            monitor.log_checkpoint(run_id, "fetch_tickers", 1 if ticker_ok else 0, 1, time.time() - start_time, 
-                                 "completed" if ticker_ok else "failed", 
-                                 None if ticker_ok else "fetch_tickers.py failed")
-    else:
-        print("[PROD] Skipping fetch_tickers.py (skip-fetch enabled)")
-        summary['fetch_tickers'] = True
+            success = False
 
-    # 2. fetch_data.py
-    data_cmd = [sys.executable, 'fetch_data.py', '--progress']
+    # Log checkpoint for fetch_tickers
+    if monitor and run_id:
+        monitor.log_checkpoint(run_id, "fetch_tickers", 1 if ticker_ok else 0, 1, time.time() - start_time, 
+                              "completed" if ticker_ok else "failed", 
+                              None if ticker_ok else "fetch_tickers.py failed")
+
+    # 2. fetch_data.py - Fetch OHLCV data for all tickers
+    data_cmd = [sys.executable, 'pipeline/fetch_data.py', '--progress']
     if args.prod:
         # Production mode: full data fetch
-        if '--force' not in data_cmd:
-            data_cmd.append('--force')
+        data_cmd.extend(['--cooldown', '1'])
+    elif args.full_test:
+        # Full test mode: comprehensive data fetch
+        data_cmd.extend(['--full-test', '--cooldown', '1'])
     elif test_mode:
         # Test mode: limited data fetch
-        data_cmd.append('--test')
-        data_cmd += ['--cooldown', '1']
-    # Note: No --test flag means full data fetch by default
+        data_cmd.extend(['--test', '--cooldown', '1'])
+    else:
+        # Default: full data fetch
+        data_cmd.extend(['--cooldown', '1'])
     
-    if args.parallel:
-        data_cmd += ['--parallel', str(args.parallel)]
     data_ok, d_time = True, 0
     if not (args.prod and args.skip_fetch):
         data_ok, d_time = run_cmd(data_cmd, desc='fetch_data')
@@ -325,41 +329,43 @@ def main():
         if not data_ok:
             failed_steps.append('fetch_data.py')
             errors.append('fetch_data.py failed')
-        success &= data_ok
-        
-        # Log checkpoint for data fetch
-        if monitor and run_id:
-            monitor.log_checkpoint(run_id, "fetch_data", 2 if data_ok else 1, 2, time.time() - start_time,
-                                 "completed" if data_ok else "failed",
-                                 None if data_ok else "fetch_data.py failed")
-    else:
-        print("[PROD] Skipping fetch_data.py (skip-fetch enabled)")
-        summary['fetch_data'] = True
+            success = False
 
-    # 3. process_features.py
-    features_cmd = [sys.executable, 'process_features.py']
+    # Log checkpoint for fetch_data
+    if monitor and run_id:
+        monitor.log_checkpoint(run_id, "fetch_data", 2 if data_ok else 1, 2, time.time() - start_time,
+                              "completed" if data_ok else "failed",
+                              None if data_ok else "fetch_data.py failed")
+
+    # 3. process_features.py - Process features and create parquet file
+    features_cmd = [sys.executable, 'pipeline/process_features.py']
     if args.prod:
-        # Production mode: full processing
-        pass
-    elif test_mode:
-        # Test mode: test processing
-        features_cmd.append('--test-mode')
-    # Note: No --test flag means full processing by default
-    
-    if args.drop_incomplete:
+        # Production mode: full feature processing
         features_cmd.append('--drop-incomplete')
-    features_ok, f_time = run_cmd(features_cmd, desc='process_features')
-    summary['process_features'] = features_ok
-    if not features_ok:
-        failed_steps.append('process_features.py')
-        errors.append('process_features.py failed')
-    success &= features_ok
+    elif args.full_test:
+        # Full test mode: comprehensive feature processing
+        features_cmd.extend(['--full-test', '--drop-incomplete'])
+    elif test_mode:
+        # Test mode: limited feature processing
+        features_cmd.append('--test-mode')
+    else:
+        # Default: full feature processing
+        features_cmd.append('--drop-incomplete')
     
-    # Log checkpoint for feature processing
+    features_ok, f_time = True, 0
+    if not (args.prod and args.skip_process):
+        features_ok, f_time = run_cmd(features_cmd, desc='process_features')
+        summary['process_features'] = features_ok
+        if not features_ok:
+            failed_steps.append('process_features.py')
+            errors.append('process_features.py failed')
+            success = False
+
+    # Log checkpoint for process_features
     if monitor and run_id:
         monitor.log_checkpoint(run_id, "process_features", 3 if features_ok else 2, 3, time.time() - start_time,
-                             "completed" if features_ok else "failed",
-                             None if features_ok else "process_features.py failed")
+                              "completed" if features_ok else "failed",
+                              None if features_ok else "process_features.py failed")
     
     # Validation: check for features.parquet and metadata.json
     from datetime import datetime
@@ -391,7 +397,7 @@ def main():
             print("pytest is required to run the test suite. Exiting.")
             sys.exit(1)
         # Use pytest-xdist for parallel execution to avoid runtime bottlenecks with sequential tests
-        test_cmd = [sys.executable, '-m', 'pytest', '-v', '-n', 'auto', '--dist=loadscope']
+        test_cmd = [sys.executable, '-m', 'pytest', '-v', '-n', 'auto', '--dist=loadscope', 'tests/']
         if args.full_test:
             print("[INFO] Running full test suite including heavy tests. This may take several minutes...")
         elif test_mode:

@@ -61,21 +61,21 @@ PYTHONPATH=$PROJECT_DIR
 PIPELINE_MODE=prod
 PYTHONUNBUFFERED=1
 
-# Project Three Data Pipeline - Daily Integrity Tests (FULL RUN - NO --test)
-# Run daily at 6:00 AM - Uses --daily-integrity for smoke tests
-0 6 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/run_daily_tests.py >> logs/cron_daily.log 2>&1
+# Project Three Data Pipeline - Daily Production Run (FULL RUN - NO --test)
+# Run daily at 4:00 AM - Fresh production data ready by 6:00 AM
+0 4 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/run_weekly_tests.py >> logs/cron_daily.log 2>&1
 
-# Project Three Data Pipeline - Weekly Integrity Tests (FULL RUN - NO --test)
-# Run weekly on Sunday at 8:00 AM - Uses --weekly-integrity for full tests
-0 8 * * 0 cd $PROJECT_DIR && $PYTHON_PATH scripts/run_weekly_tests.py >> logs/cron_weekly.log 2>&1
+# Project Three Data Pipeline - Cleanup Test Data Only
+# Run daily at 2:00 AM - Only clears test data, preserves production data for 30 days
+0 2 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/cleanup_old_reports.py --test-only >> logs/cron_cleanup.log 2>&1
 
-# Project Three Data Pipeline - Cleanup Old Reports
-# Run daily at 2:00 AM
-0 2 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/cleanup_old_reports.py >> logs/cron_cleanup.log 2>&1
+# Project Three Data Pipeline - Full Cleanup (30-day retention)
+# Run weekly on Sunday at 3:00 AM - Cleans old production data based on 30-day retention
+0 3 * * 0 cd $PROJECT_DIR && $PYTHON_PATH scripts/cleanup_old_reports.py --pipeline-data --retention-days=30 >> logs/cron_cleanup.log 2>&1
 
 # Project Three Data Pipeline - Integrity Monitoring
 # Run every 15 minutes to check pipeline status
-*/15 * * * * cd $PROJECT_DIR && $PYTHON_PATH integrity_monitor.py --monitor-pipeline >> logs/cron_monitor.log 2>&1
+*/15 * * * * cd $PROJECT_DIR && $PYTHON_PATH pipeline/utils/integrity_monitor.py --monitor-pipeline >> logs/cron_monitor.log 2>&1
 
 EOF
 
@@ -211,9 +211,9 @@ echo ""
 echo -e "${GREEN}=== CRON SETUP COMPLETE ===${NC}"
 echo ""
 echo "Installed jobs:"
-echo "  - Daily integrity tests: 6:00 AM daily (FULL RUN - NO --test)"
-echo "  - Weekly integrity tests: 8:00 AM Sundays (FULL RUN - NO --test)"  
-echo "  - Cleanup old reports: 2:00 AM daily"
+echo "  - Daily production run: 4:00 AM daily (FULL RUN - NO --test)"
+echo "  - Cleanup test data: 2:00 AM daily"
+echo "  - Full cleanup (30-day retention): 3:00 AM Sundays"
 echo "  - Integrity monitoring: Every 15 minutes"
 echo ""
 echo "Environment variables set:"
@@ -223,7 +223,6 @@ echo "  - PYTHONUNBUFFERED=1"
 echo ""
 echo "Log files will be written to:"
 echo "  - logs/cron_daily.log"
-echo "  - logs/cron_weekly.log"
 echo "  - logs/cron_cleanup.log"
 echo "  - logs/cron_monitor.log"
 echo ""

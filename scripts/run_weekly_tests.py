@@ -136,7 +136,7 @@ def main() -> int:
     
     # Run pipeline with weekly integrity mode
     cmd = [
-        sys.executable, "run_pipeline.py",
+        sys.executable, "pipeline/run_pipeline.py",
         "--weekly-integrity",
         "--parallel", str(parallel_workers),
         "--clean",

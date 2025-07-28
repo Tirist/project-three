@@ -1,523 +1,314 @@
-# Stock Evaluation Pipeline
+# Project Three - Stock Evaluation Pipeline
 
-A comprehensive pipeline for fetching, processing, and analyzing stock market data with partitioned storage and metadata logging.
+A comprehensive, production-ready data pipeline for stock market analysis with automated orchestration, integrity monitoring, and frontend dashboard preparation.
 
-## Project Structure
+## 🏗️ Project Structure
 
 ```
-Project Three/
-├── config/
-│   └── settings.yaml          # Configuration file
-├── data/                      # Partitioned data storage
-│   ├── tickers/
-│   │   └── dt=YYYY-MM-DD/
-│   │       └── tickers.csv
-│   └── raw/
-│       └── dt=YYYY-MM-DD/
-│           ├── AAPL.csv
-│           ├── MSFT.csv
-│           └── ...
-├── logs/                      # Metadata and execution logs
-│   ├── tickers/
-│   │   └── dt=YYYY-MM-DD/
-│   │       └── metadata.json
-│   └── fetch/
-│       └── dt=YYYY-MM-DD/
-│           ├── metadata.json
-│           └── errors.json
-├── tests/
-│   └── test_fetch_data.py     # Test script for fetch_data.py
-├── fetch_tickers.py           # Ticker fetching script
-├── fetch_data.py              # OHLCV data fetching script
-├── requirements.txt           # Python dependencies
-└── README.md                  # This file
+project_root/
+├── pipeline/                    # Core pipeline components
+│   ├── fetch_tickers.py        # S&P 500 ticker fetching
+│   ├── fetch_data.py           # Historical price data collection
+│   ├── process_features.py     # Feature engineering and processing
+│   ├── run_pipeline.py         # Main pipeline orchestrator
+│   └── utils/                  # Shared utilities
+│       ├── common.py           # Common functions and classes
+│       ├── logger.py           # Standardized logging
+│       ├── progress.py         # Progress tracking utilities
+│       └── integrity_monitor.py # Pipeline monitoring
+├── reports/                    # Reporting and API
+│   ├── generate_integrity_report.py
+│   ├── api.py                  # Frontend API endpoints
+│   └── integrity_reports/      # Generated reports
+├── tests/                      # Test suite
+│   ├── test_fetch_data.py
+│   ├── test_fetch_tickers.py
+│   ├── test_process_features.py
+│   └── run_all_tests.py
+├── scripts/                    # Automation scripts
+│   ├── run_daily_tests.py      # Daily smoke tests
+│   ├── run_weekly_tests.py     # Weekly full tests
+│   ├── cleanup_old_reports.py  # Data retention management
+│   └── setup_cron.sh          # Cron job setup
+├── data/                       # Data storage
+│   ├── raw/                    # Raw CSV data (partitioned by date)
+│   ├── processed/              # Processed parquet files
+│   └── test/                   # Test data (isolated)
+├── logs/                       # Logging and metadata
+│   ├── fetch/                  # Data fetching logs
+│   ├── features/               # Feature processing logs
+│   ├── tickers/                # Ticker fetching logs
+│   ├── integrity/              # Integrity monitoring logs
+│   └── structured/             # JSON logs for frontend
+├── config/                     # Configuration files
+│   ├── settings.yaml           # Main pipeline settings
+│   └── test_schedules.yaml     # Test scheduling configuration
+├── README.md                   # This file
+├── requirements.txt            # Python dependencies
+├── pytest.ini                 # Test configuration
+└── .gitignore                 # Git ignore rules
 ```
 
-## Installation
+## 🚀 Quick Start
 
-1. **Clone the repository** (if applicable)
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Prerequisites
+- Python 3.8+
+- Virtual environment (recommended)
+- Access to financial data APIs (Alpha Vantage, Yahoo Finance)
 
-## Usage
-
-### Fetch S&P 500 Tickers
-
-The `fetch_tickers.py` script fetches the current S&P 500 ticker list from Wikipedia and saves it to a partitioned folder structure.
-
-**Basic usage:**
+### Installation
 ```bash
-python3 fetch_tickers.py
+# Clone the repository
+git clone <repository-url>
+cd project-three
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set up automated scheduling
+bash scripts/setup_cron.sh
 ```
 
-**Force re-fetch (even if partition exists):**
+### Manual Pipeline Run
 ```bash
-python3 fetch_tickers.py --force
+# Full production run (all 503 S&P 500 tickers)
+python pipeline/run_pipeline.py --prod
+
+# Test run (5 tickers, isolated test data)
+python pipeline/run_pipeline.py --test
+
+# Daily integrity test
+python pipeline/run_pipeline.py --daily-integrity
+
+# Weekly integrity test
+python pipeline/run_pipeline.py --weekly-integrity
 ```
 
-**Dry-run mode (simulate without writing files):**
-```bash
-python3 fetch_tickers.py --dry-run
-```
+## 📊 Automated Schedule
 
-**Full test mode (validate entire ticker universe):**
-```bash
-python3 fetch_tickers.py --full-test
-```
+The pipeline runs automatically with the following schedule:
 
-**Use custom config file:**
-```bash
-python3 fetch_tickers.py --config path/to/config.yaml
-```
+- **4:00 AM Daily**: Full production run (503 tickers)
+- **2:00 AM Daily**: Test data cleanup
+- **3:00 AM Sundays**: Production data cleanup (30-day retention)
+- **Every 15 minutes**: Integrity monitoring
 
-**Combine flags:**
-```bash
-python3 fetch_tickers.py --force --dry-run --full-test
-```
+## 🔧 Configuration
 
-**Debug rate limit simulation:**
-```bash
-python3 fetch_tickers.py --debug-rate-limit
-python3 fetch_data.py --debug-rate-limit
-```
-
-### Fetch OHLCV Data
-
-The `fetch_data.py` script reads the latest ticker list and fetches OHLCV (Open, High, Low, Close, Volume) data for each ticker.
-
-**Basic usage:**
-```bash
-python3 fetch_data.py
-```
-
-**Test mode (small subset of tickers):**
-```bash
-python3 fetch_data.py --test
-```
-
-**Full test mode (all tickers, 2 years of data):**
-```bash
-python3 fetch_data.py --full-test
-```
-
-**Dry-run mode (simulate without writing files):**
-```bash
-python3 fetch_data.py --dry-run
-```
-
-**Force re-fetch (overwrite existing data):**
-```bash
-python3 fetch_data.py --force
-```
-
-**Combine flags:**
-```bash
-python3 fetch_data.py --test --dry-run --force
-python3 fetch_data.py --full-test --dry-run
-```
-
-### Output Structure
-
-The scripts create the following structure:
-
-**Ticker Data:**
-```
-data/tickers/dt=2025-07-18/
-└── tickers.csv               # CSV with symbol and company_name columns
-
-logs/tickers/dt=2025-07-18/
-└── metadata.json            # Execution metadata and lineage info
-```
-
-**OHLCV Data:**
-```
-data/raw/dt=2025-07-18/
-├── AAPL.csv                  # OHLCV data for Apple
-├── MSFT.csv                  # OHLCV data for Microsoft
-└── ...                       # One file per ticker
-
-logs/fetch/dt=2025-07-18/
-├── metadata.json            # Execution metadata and summary
-└── errors.json              # Error details for failed tickers
-```
-
-### Configuration
-
-Edit `config/settings.yaml` to customize:
-
-- Data source settings
-- File paths
-- Validation parameters
-- Retry logic
-
-## Features
-
-### ✅ Implemented
-- **Daily ticker ingestion** from Wikipedia S&P 500 list
-- **OHLCV data fetching** with yfinance and Alpha Vantage fallback
-- **Partitioned storage** by date (`dt=YYYY-MM-DD`)
-- **Metadata logging** in JSON format with extended fields
-- **Error handling** with retry logic and detailed error logging
-- **Ticker symbol cleaning** (e.g., BRK.B → BRK-B)
-- **Duplicate prevention** (skip if partition exists)
-- **Force re-fetch** option
-- **Test mode** for development and testing
-- **Full test mode** for comprehensive validation
-- **Dry-run mode** for simulation
-- **Retention cleanup** with configurable retention periods
-- **Rate limiting** with multiple strategies (exponential backoff, fixed delay, adaptive)
-- **Ticker change tracking** with diff logs
-- **Comprehensive logging** to both console and file
-- **Configuration management** with YAML
-- **Automated testing** with comprehensive test suite
-
-### 🔄 Stretch Goals (Optional)
-- [ ] Validate ticker count against expected range
-- [ ] Add more data sources beyond Wikipedia
-- [ ] Implement data quality checks
-- [ ] Add email notifications for failures
-
-## Metadata Schema
-
-### Ticker Metadata
-```json
-{
-  "run_date": "2025-07-18",
-  "source_primary": "wikipedia_sp500",
-  "source_secondary": null,
-  "tickers_fetched": 503,
-  "tickers_added": 2,
-  "tickers_removed": 1,
-  "skipped_tickers": 0,
-  "status": "success",
-  "runtime_seconds": 1.29,
-  "runtime_minutes": 0.02,
-  "api_retries": 0,
-  "rate_limit_hits": 0,
-  "rate_limit_strategy": "exponential_backoff",
-  "error_message": null,
-  "full_test_mode": false,
-  "dry_run_mode": false
-}
-```
-
-### OHLCV Metadata
-```json
-{
-  "run_date": "2025-07-18",
-  "source_primary": "yfinance",
-  "source_secondary": "alpha_vantage",
-  "tickers_processed": 3,
-  "tickers_successful": 3,
-  "tickers_failed": 0,
-  "skipped_tickers": 0,
-  "status": "success",
-  "runtime_seconds": 0.73,
-  "runtime_minutes": 0.01,
-  "api_retries": 0,
-  "rate_limit_hits": 0,
-  "rate_limit_strategy": "exponential_backoff",
-  "error_message": null,
-  "test_mode": true,
-  "full_test_mode": false,
-  "dry_run_mode": false
-}
-```
-
-### Ticker Diff Log
-```json
-{
-  "run_date": "2025-07-18",
-  "timestamp": "2025-07-18T21:00:00",
-  "tickers_added": ["NEW", "IPO"],
-  "tickers_removed": ["DELISTED"],
-  "total_added": 2,
-  "total_removed": 1,
-  "net_change": 1
-}
-```
-
-### Cleanup Log
-```json
-{
-  "cleanup_date": "2025-07-18",
-  "retention_days": 30,
-  "cutoff_date": "2025-06-18",
-  "partitions_deleted": [
-    "data/tickers/dt=2025-06-15",
-    "data/raw/dt=2025-06-15"
-  ],
-  "total_deleted": 2,
-  "errors": []
-}
-```
-
-## Error Handling
-
-The script handles various error scenarios:
-
-- **Network failures**: Automatic retry with exponential backoff
-- **Missing config**: Falls back to default settings
-- **Invalid data**: Logs warnings but continues execution
-- **File system errors**: Creates directories as needed
-- **Parsing errors**: Detailed error logging
-
-## Logging
-
-Logs are written to:
-- **Console**: Real-time execution status
-- **File**: `fetch_tickers.log` for historical tracking
-- **Metadata**: JSON files for lineage and debugging
-
-## Testing
-
-Run the automated test suites:
-
-```bash
-# Test fetch_data.py functionality
-PYTHONPATH=. python3 tests/test_fetch_data.py
-
-# Test fetch_tickers.py functionality
-PYTHONPATH=. python3 tests/test_fetch_tickers.py
-```
-
-The test suites validate:
-- **Metadata consistency** and extended field validation
-- **Data column structure** and integrity
-- **Error handling** for invalid tickers and API failures
-- **Force flag functionality** and duplicate prevention
-- **Retention cleanup** with configurable periods
-- **Rate limiting** with multiple strategies
-- **Full test mode** and dry-run functionality
-- **Ticker change tracking** and diff logging
-- **Mock API failures** and graceful error handling
-
-## Performance and Rate Limiting
-
-### Rate Limit Strategies
-The pipeline supports three rate limiting strategies:
-
-1. **Exponential Backoff** (default): Doubles delay time with each retry
-2. **Fixed Delay**: Uses constant delay between retries
-3. **Adaptive**: Scales delay based on attempt number
-
-### Configuration
+### Pipeline Settings (`config/settings.yaml`)
 ```yaml
-rate_limit_enabled: true
-rate_limit_strategy: "exponential_backoff"
-max_rate_limit_hits: 10
-base_cooldown_seconds: 1
-max_cooldown_seconds: 60
+# Data sources
+data_sources:
+  primary: "alpha_vantage"
+  secondary: "yfinance"
+  
+# API configuration
+api:
+  alpha_vantage_key: "your_key_here"
+  rate_limit_delay: 12  # seconds between requests
+  
+# Processing settings
+processing:
+  parallel_workers: 4
+  batch_size: 50
+  retention_days: 30
 ```
 
-### Performance Guidelines
-- **Test Mode**: 3 tickers, ~1 second runtime
-- **Production Mode**: 503 tickers, ~5-10 minutes runtime
-- **Full Test Mode**: 503 tickers, 2 years data, ~30-60 minutes runtime
-- **Rate Limits**: yfinance ~1000 requests/hour, Alpha Vantage ~5 requests/minute
+### Test Schedules (`config/test_schedules.yaml`)
+```yaml
+daily_tests:
+  enabled: true
+  timeout_minutes: 30
+  parallel_workers: 2
+  
+weekly_tests:
+  enabled: true
+  timeout_minutes: 120
+  parallel_workers: 8
+  
+notifications:
+  enabled: false
+  webhook_url: "https://hooks.slack.com/..."
+```
 
-### Monitoring
-Monitor these metrics in metadata:
-- `api_retries`: Number of retry attempts
-- `rate_limit_hits`: Rate limit events encountered
-- `runtime_minutes`: Total execution time
-- `tickers_successful/failed`: Success rate
+## 🧪 Testing
 
-### Process Features (Technical Indicators)
-
-The `process_features.py` script reads all OHLCV data, computes technical indicators, and saves a merged features dataset.
-
-**Basic usage:**
+### Run All Tests
 ```bash
-python3 process_features.py
+python tests/run_all_tests.py
 ```
 
-**Test mode (small subset of data):**
+### Run Specific Test Categories
 ```bash
-python3 process_features.py --test
+# Quick tests only
+pytest tests/ -m quick
+
+# Full test suite
+pytest tests/ -m heavy
+
+# Specific test file
+pytest tests/test_fetch_data.py
 ```
 
-**Dry-run mode (simulate without writing files):**
+### Test Coverage
 ```bash
-python3 process_features.py --dry-run
+pytest tests/ --cov=pipeline --cov-report=html
 ```
 
-**Force re-process (overwrite existing features partition):**
+## 📈 Monitoring & Reporting
+
+### Integrity Reports
 ```bash
-python3 process_features.py --force
+# Generate latest report
+python reports/generate_integrity_report.py --type daily
+
+# Generate weekly report
+python reports/generate_integrity_report.py --type weekly --date 2025-07-27
 ```
 
-**Combine flags:**
+### Pipeline Status
 ```bash
-python3 process_features.py --test --dry-run --force
+# Check pipeline status
+python pipeline/utils/integrity_monitor.py --monitor-pipeline
+
+# Verify cron configuration
+python pipeline/utils/integrity_monitor.py --check-cron
+
+# Retry failed runs
+python pipeline/utils/integrity_monitor.py --retry-failed
 ```
 
-**Export a sample of features:**
+## 🌐 Frontend API
+
+### Start API Server
 ```bash
-python3 process_features.py --sample
+python reports/api.py --port 8080
 ```
 
-**Drop incomplete tickers:**
-```bash
-python3 process_features.py --drop-incomplete
-```
+### Available Endpoints
+- `GET /api/status` - Overall pipeline status
+- `GET /api/reports/latest` - Latest integrity report
+- `GET /api/reports/daily` - Daily reports
+- `GET /api/reports/weekly` - Weekly reports
+- `GET /api/data/freshness` - Data freshness information
+- `GET /api/pipeline/runs` - Recent pipeline runs
 
-### Technical Indicators Generated
-
-The following indicators are computed for each ticker:
-
-- **SMA_5, SMA_10, SMA_20, SMA_50, SMA_200**: Simple Moving Averages (5, 10, 20, 50, 200 days)
-- **EMA_12, EMA_26**: Exponential Moving Averages (12, 26 days)
-- **RSI_14**: Relative Strength Index (14-day)
-- **MACD, MACD_Signal, MACD_Histogram**: Moving Average Convergence Divergence (12, 26, 9)
-- **Bollinger Bands**: 20-day SMA ± 2 stddev (BB_Upper, BB_Lower, BB_Middle, BB_Width, BB_%B)
-- **Volume_SMA_20**: 20-day average volume
-- **Momentum_1d, Momentum_5d, Momentum_10d**: Price momentum
-- **ATR_14**: Average True Range (14-day)
-- **Stoch_%K, Stoch_%D**: Stochastic Oscillator
-
-**Example features.parquet schema:**
-```
-[date, ticker, open, high, low, close, volume, SMA_5, SMA_10, SMA_20, SMA_50, SMA_200, EMA_12, EMA_26, RSI_14, MACD, MACD_Signal, MACD_Histogram, BB_Upper, BB_Lower, BB_Middle, BB_Width, BB_%B, Volume_SMA, Momentum_1d, Momentum_5d, Momentum_10d, ATR_14, Stoch_%K, Stoch_%D]
-```
-
-### Features Metadata Example
+### Example API Response
 ```json
 {
-  "run_date": "2025-07-18",
-  "tickers_processed": 3,
-  "features_generated": ["SMA_5", "SMA_10", "EMA_12", "EMA_26", "RSI_14", "MACD", "BB_Upper", "BB_Lower"],
-  "batch_size": 10,
-  "cooldown_seconds": 2,
-  "rate_limit_hits": 1,
-  "total_sleep_time": 30,
-  "status": "success"
-}
-```
-
-### Sample errors.json
-```json
-[
-  {
-    "ticker": "FAKE",
-    "error": "Failed to fetch data from all sources",
-    "timestamp": "2025-07-18T21:00:00"
+  "timestamp": "2025-07-27T14:30:00",
+  "status": "success",
+  "data": {
+    "pipeline_status": {
+      "running": false,
+      "last_run": "2025-07-27T04:00:00",
+      "next_scheduled": "4:00 AM daily (production)"
+    },
+    "data_status": {
+      "raw_data": {
+        "latest_partition": "2025-07-27",
+        "partition_count": 7,
+        "partitions": ["2025-07-21", "2025-07-25", "2025-07-27"]
+      }
+    }
   }
-]
-```
-
-### Sample cleanup.json
-```json
-{
-  "cleanup_date": "2025-07-18",
-  "retention_days": 30,
-  "cutoff_date": "2025-06-18",
-  "partitions_deleted": [
-    "data/processed/dt=2025-06-15"
-  ],
-  "total_deleted": 1,
-  "errors": []
 }
 ```
 
-### Batch Processing & Cooldown
+## 🔍 Data Structure
 
-- **--batch-size**: Number of tickers per batch (default: 25)
-- **--cooldown**: Seconds to sleep between batches (default: 1-2)
-- **--progress**: Show real-time progress bar (tqdm)
-- **--debug-rate-limit**: Simulate/log rate limit events and cooldowns (for testing)
-- **--sample**: Export a sample CSV with 5 random tickers × 7 days (process_features.py)
-- **--test**: Use a small subset of tickers/data for fast validation
-- **--dry-run**: Simulate all operations, no files written
-- **--drop-incomplete**: Drop tickers with fewer than 500 rows and drop initial NaN rows per ticker (for clean ML datasets)
+### Raw Data (`data/raw/dt=YYYY-MM-DD/`)
+- CSV files for each S&P 500 ticker
+- Columns: Date, Open, High, Low, Close, Volume
+- Partitioned by date for efficient querying
 
-**API Rate Limits:**
-- **yfinance**: ~1000 requests/hour (subject to change)
-- **Alpha Vantage**: 5 requests/minute (free tier)
+### Processed Data (`data/processed/dt=YYYY-MM-DD/`)
+- `features.parquet` - Consolidated feature dataset
+- Technical indicators and derived features
+- Optimized for analysis and modeling
 
-**Recommended settings for S&P 500:**
-- `--batch-size 25 --cooldown 2` (safe for most free API quotas)
-- Monitor `rate_limit_hits` and `total_sleep_time` in metadata for tuning
+### Logs (`logs/`)
+- Structured JSON logs for frontend consumption
+- Metadata for each pipeline stage
+- Performance metrics and error tracking
 
-## One-Click Pipeline Execution
+## 🛠️ Development
 
-The recommended way to run the full pipeline is with the orchestrator script:
+### Adding New Features
+1. Create feature in appropriate pipeline module
+2. Add tests in `tests/` directory
+3. Update configuration if needed
+4. Update documentation
 
-**Quick validation (test mode):**
+### Code Style
+- Follow PEP 8 guidelines
+- Use type hints
+- Add docstrings for all functions
+- Run tests before committing
+
+### Common Utilities
+The `pipeline/utils/` module provides:
+- `PipelineConfig`: Centralized configuration management
+- `DataManager`: Data directory and file operations
+- `LogManager`: Standardized logging and metadata
+- `ProgressTracker`: Progress bar utilities
+- `IntegrityMonitor`: Pipeline monitoring and reporting
+
+## 📋 Maintenance
+
+### Data Cleanup
 ```bash
-python3 run_pipeline.py --test
+# Clean test data only
+python scripts/cleanup_old_reports.py --test-only
+
+# Clean production data (30-day retention)
+python scripts/cleanup_old_reports.py --pipeline-data --retention-days=30
+
+# Clean everything
+python scripts/cleanup_old_reports.py --all
 ```
 
-**Full pipeline with parallel fetch and data cleaning:**
+### Log Management
 ```bash
-python3 run_pipeline.py --full --parallel 8 --drop-incomplete
+# Manual log rotation
+bash scripts/rotate_logs.sh
+
+# View recent logs
+tail -f logs/cron_daily.log
 ```
 
-**Test-only mode (run all tests):**
-```bash
-python3 run_all_tests.py
-```
+### Troubleshooting
+1. Check cron jobs: `crontab -l`
+2. Verify Python environment: `which python`
+3. Test pipeline manually: `python pipeline/run_pipeline.py --test`
+4. Check integrity: `python pipeline/utils/integrity_monitor.py --check-cron`
 
-This will:
-- Run ticker ingestion, OHLCV fetching, and feature engineering in sequence
-- Pass all relevant flags to each stage
-- Run the full test suite at the end
-- Print a final summary of results
+## 🤝 Contributing
 
-> For most users, use `run_pipeline.py` as your entry point for data updates and validation.
+1. Fork the repository
+2. Create a feature branch
+3. Make changes with tests
+4. Run full test suite
+5. Submit pull request
 
-### End-to-End Validation
+## 📄 License
 
-**Run a full test pipeline:**
-```bash
-python3 fetch_tickers.py --test --force
-python3 fetch_data.py --test --batch-size 10 --cooldown 2
-python3 process_features.py --test
-```
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-**Expected outputs:**
-```
-data/tickers/dt=YYYY-MM-DD/tickers.csv
-data/raw/dt=YYYY-MM-DD/AAPL.csv
-data/processed/dt=YYYY-MM-DD/features.parquet
-```
+## 🆘 Support
 
-### Running All Tests
-
-Run the full test suite:
-```bash
-pytest tests/
-```
-
-**Test coverage:**
-- **Batching:** Confirms correct batch sizes and all tickers processed
-- **Cooldown:** Verifies total sleep time is logged and respected
-- **Progress Bar:** Ensures progress bar does not interfere with logs
-- **Error Handling:** Simulates failures and checks errors.json
-- **Feature Calculations:** Validates technical indicator correctness and schema
-
-## Next Steps
-
-This is the second component of the stock evaluation pipeline. Future components will include:
-
-1. **Technical Analysis** (`analyze_data.py`)
-2. **Portfolio Optimization** (`optimize_portfolio.py`)
-3. **Reporting and Visualization** (`generate_reports.py`)
+For issues and questions:
+1. Check the troubleshooting section
+2. Review logs in `logs/` directory
+3. Run integrity checks
+4. Create an issue with detailed information
 
 ---
 
-For a full end-to-end checklist and sample output validation, see [docs/VALIDATION.md](docs/VALIDATION.md).
-
-## Contributing
-
-1. Follow the existing code style
-2. Add comprehensive docstrings
-3. Include error handling
-4. Update configuration as needed
-5. Test with various scenarios
-
-## License
-
-[Add your license information here] 
+**Last Updated**: July 27, 2025  
+**Version**: 1.0.0  
+**Status**: Production Ready 
