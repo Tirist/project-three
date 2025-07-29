@@ -1,0 +1,150 @@
+# Stock Pipeline Dashboard Report
+
+**Generated:** 2025-07-28T20:44:40.896693  
+**Analysis Period:** Last 9 pipeline runs  
+**Data Sources:** logs/, integrity_reports/, pipeline_runs.json
+
+## 🚨 Critical Status Alert
+
+**Overall Success Rate: 11.1%** (1 successful out of 9 runs)
+
+### Current Pipeline Status
+- **Status:** FAILED
+- **Current Run:** weekly_20250728_070546
+- **Current Stage:** process_features
+- **Progress:** 66.7% (2/3 tickers processed)
+- **Elapsed Time:** 20,681 seconds (5.7 hours)
+- **Estimated Remaining:** 10,341 seconds (2.9 hours)
+
+## 📊 Recent Pipeline Runs Summary
+
+| Run ID | Date | Mode | Status | Runtime | Error |
+|--------|------|------|--------|---------|-------|
+| weekly_20250728_070546 | 2025-07-28 | weekly | **RUNNING** | 20,681s | process_features.py failed |
+| manual_test_20250727_144159 | 2025-07-27 | manual_test | **FAILED** | 518s | fetch_data.py failed; run_all_tests.py failed |
+| daily_20250727_062645 | 2025-07-27 | daily | **FAILED** | 527s | run_all_tests.py failed |
+| manual_test_20250726_213029 | 2025-07-26 | manual_test | **FAILED** | 525s | fetch_data.py failed; run_all_tests.py failed |
+| daily_20250726_214801 | 2025-07-26 | daily | **FAILED** | 525s | fetch_data.py failed; run_all_tests.py failed |
+
+## 🔍 Error Analysis
+
+### Error Distribution (Last 9 Runs)
+- **fetch_data.py failures:** 4 occurrences
+- **run_all_tests.py failures:** 2 occurrences  
+- **fetch_tickers.py failures:** 1 occurrence
+
+### Most Common Failure Points
+1. **Data Fetching Stage** - API connectivity issues
+2. **Testing Stage** - Test suite failures
+3. **Feature Processing** - Data quality issues
+
+## 📈 Stage Performance Metrics
+
+### Latest Run (2025-07-28) Stage Details
+
+#### Tickers Stage ✅
+- **Status:** Completed
+- **Runtime:** 51.64 seconds
+- **Tickers Fetched:** 503
+- **Tickers Added:** 493
+- **Tickers Removed:** 993
+- **Success Rate:** 100%
+
+#### Fetch Data Stage ❌
+- **Status:** Failed
+- **Runtime:** 16,929 seconds (4.7 hours)
+- **Tickers Processed:** 503
+- **Tickers Successful:** 502
+- **Tickers Failed:** 1 (BF.B)
+- **Success Rate:** 99.8%
+
+#### Features Stage ❌
+- **Status:** Failed
+- **Runtime:** 6.97 seconds
+- **Files Processed:** 502
+- **Tickers Successful:** 501
+- **Tickers Failed:** 1 (BRK.B)
+- **Features Generated:** 12
+- **Rows Dropped:** 15,030 (due to NaN values)
+- **Success Rate:** 99.8%
+
+## 🏥 System Health
+
+### Disk Usage
+- **Total:** 931 GB
+- **Used:** 339 GB (36.5%)
+- **Free:** 591 GB
+- **Status:** ✅ Healthy
+
+### Data Freshness
+- **Raw Data:** dt=2025-07-28 ✅
+- **Processed Data:** dt=2025-07-28 ✅
+- **Tickers Data:** dt=2025-07-28 ✅
+
+## ⚠️ Key Issues Identified
+
+### 1. High Failure Rate
+- Only 11.1% success rate over recent runs
+- Multiple consecutive failures in fetch_data stage
+
+### 2. Long Runtime Issues
+- Current run has been running for 5.7+ hours
+- Fetch data stage taking 4.7+ hours (excessive)
+
+### 3. Data Quality Issues
+- 15,030 rows dropped due to NaN values in feature processing
+- Consistent failures with specific tickers (BF.B, BRK.B)
+
+### 4. Test Suite Problems
+- All recent runs failing at testing stage
+- Test failures preventing successful pipeline completion
+
+## 🎯 Recommendations
+
+### Immediate Actions Required
+1. **Investigate API Connectivity** - Multiple fetch_data failures suggest API issues
+2. **Review Test Suite** - All runs failing at testing stage
+3. **Monitor Current Run** - Weekly run has been running for 5.7+ hours
+4. **Check Data Quality** - High number of NaN values in feature processing
+
+### Long-term Improvements
+1. **Implement Better Error Handling** - Add retry logic for API failures
+2. **Optimize Runtime** - Reduce fetch data stage duration
+3. **Improve Data Validation** - Address NaN value issues
+4. **Enhance Monitoring** - Add real-time alerts for long-running jobs
+
+## 📋 Recent Integrity Reports
+
+### Daily Report (2025-07-27)
+- **Total Runtime:** 527.6 seconds
+- **Success:** ❌ Failed
+- **Failed Steps:** run_all_tests.py
+- **Recent Errors:** 44 errors detected
+- **Recommendations:** Investigate failed tests, pipeline runtime exceeded threshold
+
+### Summary Report (2025-07-26)
+- **Period:** 1 day
+- **Total Runs:** 0 (no data available)
+- **Success Rate:** 0%
+
+## 🔄 Pipeline Stages Overview
+
+| Stage | Avg Runtime | Success Rate | Common Issues |
+|-------|-------------|--------------|---------------|
+| cleanup | <1s | 100% | None |
+| fetch_tickers | 53s | 100% | None |
+| fetch_data | 4,157s | 99.8% | API failures, long runtime |
+| process_features | 7s | 99.8% | NaN values, data quality |
+| testing | 518s | 0% | Test suite failures |
+
+## 📞 Next Steps
+
+1. **Immediate:** Monitor current weekly run and investigate if it should be terminated
+2. **Short-term:** Fix API connectivity issues and test suite problems
+3. **Medium-term:** Implement better error handling and monitoring
+4. **Long-term:** Optimize pipeline performance and data quality
+
+---
+
+*Report generated by Dashboard Report Generator v1.0*  
+*For detailed logs and metadata, see logs/ directory* 
