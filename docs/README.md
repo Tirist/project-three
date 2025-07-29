@@ -30,6 +30,11 @@ project_root/
 │   ├── run_weekly_tests.py     # Weekly full tests
 │   ├── cleanup_old_reports.py  # Data retention management
 │   └── setup_cron.sh          # Cron job setup
+├── tools/                      # Maintenance and utilities
+│   └── maintenance/           # Pipeline maintenance tools
+│       └── fixes/             # Recovery and fix scripts
+│           ├── populate_historical.py  # Historical data recovery
+│           └── README.md       # Fix documentation
 ├── data/                       # Data storage
 │   ├── raw/                    # Raw CSV data (partitioned by date)
 │   ├── processed/              # Processed parquet files
@@ -312,7 +317,26 @@ tail -f logs/cron_daily.log
 4. Check integrity: `python pipeline/utils/integrity_monitor.py --check-cron`
 5. Run test suite: `python tests/run_all_tests.py`
 
+### Recovery and Maintenance
+```bash
+# Recover missing historical data
+python tools/maintenance/fixes/populate_historical.py
+
+# Check available maintenance scripts
+ls tools/maintenance/fixes/
+
+# View maintenance documentation
+cat tools/maintenance/fixes/README.md
+```
+
 ## 🎯 Recent Improvements
+
+### Pipeline Bug Fixes (July 2025)
+- ✅ **Fixed missing `--skip-process` argument** in run_pipeline.py argument parser
+- ✅ **Improved NaN handling** in process_features.py to preserve data with technical indicators
+- ✅ **Added missing dependencies** (fastparquet, tqdm) to requirements.txt
+- ✅ **Created maintenance scripts** for historical data recovery and pipeline fixes
+- ✅ **Enhanced data validation** and error recovery mechanisms
 
 ### Project Consolidation (July 2025)
 - ✅ **Reorganized project structure** for better maintainability

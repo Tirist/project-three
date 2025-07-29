@@ -193,6 +193,7 @@ def main():
     parser.add_argument('--full-test', action='store_true', help='Run full pipeline and all tests (including heavy tests)')
     parser.add_argument('--prod', action='store_true', help='Run pipeline in production mode (full data, no test/sample flags, always clean)')
     parser.add_argument('--skip-fetch', action='store_true', help='Skip fetch_tickers and fetch_data if data is up-to-date')
+    parser.add_argument('--skip-process', action='store_true', help='Skip process_features.py step')
     parser.add_argument('--parallel', type=int, default=None, help='Parallel worker count for fetch_data.py')
     parser.add_argument('--drop-incomplete', action='store_true', help='Drop tickers with <500 rows in process_features.py')
     parser.add_argument('--auto-install-pytest', action='store_true', help='Auto-install pytest if missing')

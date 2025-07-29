@@ -94,9 +94,11 @@ class FeatureProcessor:
         df = df.drop(columns=["bb_std"], errors="ignore")
         # Lowercase columns again (in case new ones added)
         df.columns = [c.lower() for c in df.columns]
-        # Drop NaN rows caused by rolling calculations
+        # Drop NaN rows caused by rolling calculations, but keep rows with base OHLCV data
         rows_before = len(df)
-        df = df.dropna().copy()
+        # Only drop rows where base OHLCV columns have NaN values
+        base_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+        df = df.dropna(subset=base_columns).copy()
         rows_dropped = rows_before - len(df)
         return df, rows_dropped
 
