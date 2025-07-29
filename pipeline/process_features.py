@@ -23,6 +23,7 @@ class FeatureProcessor:
         self.config = self.load_config(config_path)
         self.raw_path = Path(self.config.get("raw_data_path", "data/raw"))
         self.processed_path = Path(self.config.get("processed_data_path", "data/processed"))
+        self.historical_path = Path(self.config.get("historical_data_path", "data/raw/historical"))
         self.metadata_path = Path("logs/features")
         self.metadata_path.mkdir(parents=True, exist_ok=True)
         # Determine mode from environment variable or config
@@ -117,6 +118,104 @@ class FeatureProcessor:
         latest_partition = max(partitions, key=lambda x: x.name)
         logging.info(f"Found latest raw data partition: {latest_partition}")
         return latest_partition
+    
+    def load_historical_data(self, ticker: str) -> pd.DataFrame:
+        """
+        Load historical data for a ticker from partitioned storage.
+        
+        Args:
+            ticker: Ticker symbol
+            
+        Returns:
+            DataFrame with historical data or empty DataFrame if not found
+        """
+        try:
+            ticker_dir = self.historical_path / f"ticker={ticker}"
+            if not ticker_dir.exists():
+                logging.debug(f"No historical data found for {ticker}")
+                return pd.DataFrame()
+            
+            # Load all year partitions
+            all_data = []
+            for year_dir in ticker_dir.glob("year=*"):
+                data_file = year_dir / "data.parquet"
+                if data_file.exists():
+                    year_data = pd.read_parquet(data_file)
+                    all_data.append(year_data)
+            
+            if not all_data:
+                logging.debug(f"No historical data files found for {ticker}")
+                return pd.DataFrame()
+            
+            # Combine all years
+            combined_df = pd.concat(all_data, ignore_index=True)
+            combined_df['date'] = pd.to_datetime(combined_df['date'])
+            combined_df = combined_df.sort_values('date').reset_index(drop=True)
+            
+            logging.debug(f"Loaded {len(combined_df)} historical rows for {ticker}")
+            return combined_df
+            
+        except Exception as e:
+            logging.error(f"Error loading historical data for {ticker}: {e}")
+            return pd.DataFrame()
+    
+    def combine_historical_and_current(self, ticker: str, current_data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Combine historical data with current data for feature calculation.
+        
+        Args:
+            ticker: Ticker symbol
+            current_data: Current day's data
+            
+        Returns:
+            Combined DataFrame with historical + current data
+        """
+        historical_df = self.load_historical_data(ticker)
+        
+        if historical_df.empty:
+            logging.info(f"No historical data for {ticker}, using current data only")
+            return current_data
+        
+        # Ensure date columns are datetime
+        current_data['date'] = pd.to_datetime(current_data['date'])
+        historical_df['date'] = pd.to_datetime(historical_df['date'])
+        
+        # Combine data, keeping the most recent version of any duplicate dates
+        combined_df = pd.concat([historical_df, current_data], ignore_index=True)
+        combined_df = combined_df.drop_duplicates(subset=['date'], keep='last')
+        combined_df = combined_df.sort_values('date').reset_index(drop=True)
+        
+        logging.info(f"Combined data for {ticker}: {len(historical_df)} historical + {len(current_data)} current = {len(combined_df)} total")
+        return combined_df
+    
+    def process_ticker_with_historical(self, ticker: str, current_data: pd.DataFrame) -> tuple:
+        """
+        Process a ticker using combined historical and current data.
+        
+        Args:
+            ticker: Ticker symbol
+            current_data: Current day's data
+            
+        Returns:
+            Tuple of (processed_data, rows_dropped)
+        """
+        # Combine historical and current data
+        combined_data = self.combine_historical_and_current(ticker, current_data)
+        
+        if combined_data.empty:
+            logging.warning(f"No data available for {ticker}")
+            return None, 0
+        
+        # Add features using the combined dataset
+        processed_data, rows_dropped = self.add_features(combined_data, ticker)
+        
+        if processed_data is not None:
+            # Keep only the most recent data for output (last 30 days)
+            recent_data = processed_data.tail(30)
+            logging.info(f"Processed {ticker}: {len(combined_data)} total rows, {len(recent_data)} recent rows output")
+            return recent_data, rows_dropped
+        else:
+            return None, rows_dropped
 
     def create_output_paths(self, date_str, test_mode=False):
         """Create output paths for processed data and metadata."""
@@ -180,8 +279,11 @@ class FeatureProcessor:
                     # Load data
                     df = pd.read_csv(csv_file)
                     
-                    # Add features
-                    processed_df, rows_dropped = self.add_features(df, ticker)
+                    # Add features using historical data if available
+                    if self.config.get("incremental_mode", True):
+                        processed_df, rows_dropped = self.process_ticker_with_historical(ticker, df)
+                    else:
+                        processed_df, rows_dropped = self.add_features(df, ticker)
                     
                     if processed_df is not None:
                         processed_data.append(processed_df)

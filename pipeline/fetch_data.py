@@ -81,6 +81,7 @@ class OHLCVFetcher:
             "base_log_path": "logs/",
             "ohlcv_data_path": "raw",
             "ohlcv_log_path": "fetch",
+            "historical_data_path": "raw/historical",
             "retention_days": 3,
             "api_retry_attempts": 3,
             "api_retry_delay": 1,
@@ -96,7 +97,9 @@ class OHLCVFetcher:
             "performance_logging": True,
             "progress": True,  # Enable progress by default
             "parallel_workers": None,
-            "adaptive_reduce_every": 3
+            "adaptive_reduce_every": 3,
+            "incremental_mode": True,  # Enable incremental updates
+            "min_historical_days": 730  # Minimum days of historical data required
         }
         
         try:
@@ -500,6 +503,197 @@ class OHLCVFetcher:
             logging.info(f"Saved cleanup log to {cleanup_file}")
         
         return cleanup_log
+    
+    def get_historical_data_path(self, ticker: str) -> Path:
+        """
+        Get the path to historical data for a ticker.
+        
+        Args:
+            ticker: Ticker symbol
+            
+        Returns:
+            Path to historical data directory
+        """
+        historical_base = Path(self.config["base_data_path"]) / self.config["historical_data_path"]
+        return historical_base / f"ticker={ticker}"
+    
+    def load_historical_data(self, ticker: str) -> Optional[pd.DataFrame]:
+        """
+        Load historical data for a ticker from partitioned storage.
+        
+        Args:
+            ticker: Ticker symbol
+            
+        Returns:
+            DataFrame with historical data or None if not found
+        """
+        try:
+            ticker_dir = self.get_historical_data_path(ticker)
+            if not ticker_dir.exists():
+                return None
+            
+            # Load all year partitions
+            all_data = []
+            for year_dir in ticker_dir.glob("year=*"):
+                data_file = year_dir / "data.parquet"
+                if data_file.exists():
+                    year_data = pd.read_parquet(data_file)
+                    all_data.append(year_data)
+            
+            if not all_data:
+                return None
+            
+            # Combine all years
+            combined_df = pd.concat(all_data, ignore_index=True)
+            combined_df['date'] = pd.to_datetime(combined_df['date'])
+            combined_df = combined_df.sort_values('date').reset_index(drop=True)
+            
+            logging.debug(f"Loaded {len(combined_df)} historical rows for {ticker}")
+            return combined_df
+            
+        except Exception as e:
+            logging.error(f"Error loading historical data for {ticker}: {e}")
+            return None
+    
+    def get_latest_date(self, ticker: str) -> Optional[datetime]:
+        """
+        Get the latest date available for a ticker.
+        
+        Args:
+            ticker: Ticker symbol
+            
+        Returns:
+            Latest date or None if no data available
+        """
+        historical_df = self.load_historical_data(ticker)
+        if historical_df is None or len(historical_df) == 0:
+            return None
+        
+        max_date = historical_df['date'].max()
+        if pd.isna(max_date):
+            return None
+        return max_date.to_pydatetime() if hasattr(max_date, 'to_pydatetime') else max_date
+    
+    def check_historical_completeness(self, ticker: str) -> Tuple[bool, int]:
+        """
+        Check if historical data is complete (has minimum required days).
+        
+        Args:
+            ticker: Ticker symbol
+            
+        Returns:
+            Tuple of (is_complete, days_available)
+        """
+        historical_df = self.load_historical_data(ticker)
+        if historical_df is None:
+            return False, 0
+        
+        days_available = len(historical_df)
+        min_days = self.config.get("min_historical_days", 730)
+        
+        return days_available >= min_days, days_available
+    
+    def fetch_incremental_data(self, ticker: str, days_back: int = 30) -> Optional[pd.DataFrame]:
+        """
+        Fetch only new data since the last available date.
+        
+        Args:
+            ticker: Ticker symbol
+            days_back: Number of days to fetch if no historical data exists
+            
+        Returns:
+            DataFrame with new data or None if failed
+        """
+        latest_date = self.get_latest_date(ticker)
+        
+        if latest_date is None:
+            # No historical data, fetch recent data
+            logging.info(f"No historical data for {ticker}, fetching {days_back} days")
+            return self.fetch_ohlcv_data(ticker, days_back)
+        
+        # Calculate days since last update
+        days_since_last = (datetime.now() - latest_date).days
+        
+        if days_since_last <= 0:
+            logging.info(f"{ticker} is up to date (last update: {latest_date})")
+            return None
+        
+        if days_since_last > days_back:
+            # Gap is too large, fetch more data
+            logging.warning(f"Large gap detected for {ticker}: {days_since_last} days, fetching {days_back} days")
+            return self.fetch_ohlcv_data(ticker, days_back)
+        
+        # Fetch incremental data
+        logging.info(f"Fetching {days_since_last} days of incremental data for {ticker}")
+        return self.fetch_ohlcv_data(ticker, days_since_last)
+    
+    def merge_with_historical(self, ticker: str, new_data: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """
+        Merge new data with historical data, avoiding duplicates.
+        
+        Args:
+            ticker: Ticker symbol
+            new_data: New data to merge
+            
+        Returns:
+            Combined DataFrame or None if failed
+        """
+        try:
+            historical_df = self.load_historical_data(ticker)
+            
+            if historical_df is None:
+                # No historical data, just return new data
+                return new_data
+            
+            # Ensure date columns are datetime
+            new_data['date'] = pd.to_datetime(new_data['date'])
+            historical_df['date'] = pd.to_datetime(historical_df['date'])
+            
+            # Remove duplicates based on date
+            combined_df = pd.concat([historical_df, new_data], ignore_index=True)
+            combined_df = combined_df.drop_duplicates(subset=['date'], keep='last')
+            combined_df = combined_df.sort_values('date').reset_index(drop=True)
+            
+            logging.info(f"Merged data for {ticker}: {len(historical_df)} historical + {len(new_data)} new = {len(combined_df)} total")
+            return combined_df
+            
+        except Exception as e:
+            logging.error(f"Error merging data for {ticker}: {e}")
+            return None
+    
+    def save_historical_data(self, ticker: str, df: pd.DataFrame) -> bool:
+        """
+        Save data in historical partitioned format.
+        
+        Args:
+            ticker: Ticker symbol
+            df: Data to save
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            ticker_dir = self.get_historical_data_path(ticker)
+            ticker_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Group by year and save
+            df['year'] = df['date'].dt.year
+            
+            for year, year_data in df.groupby('year'):
+                year_dir = ticker_dir / f"year={year}"
+                year_dir.mkdir(exist_ok=True)
+                
+                # Save as parquet for efficiency
+                output_file = year_dir / "data.parquet"
+                year_data.to_parquet(output_file, index=False)
+                
+                logging.debug(f"Saved {len(year_data)} rows for {ticker} year {year}")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error saving historical data for {ticker}: {e}")
+            return False
     
     def handle_rate_limit(self, attempt: int) -> None:
         """
