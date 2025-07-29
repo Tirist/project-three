@@ -70,13 +70,15 @@ class HistoricalDataBootstrapper:
             start_date = end_date - timedelta(days=730)  # ~2 years
             
             params = {
-                "function": "TIME_SERIES_DAILY_ADJUSTED",
+                "function": "TIME_SERIES_DAILY",
                 "symbol": ticker,
                 "apikey": self.api_key,
                 "outputsize": "full"  # Get full history
             }
             
             self.logger.debug(f"Fetching data for {ticker}")
+            self.logger.debug(f"API URL: {self.base_url}")
+            self.logger.debug(f"API params: {params}")
             response = requests.get(self.base_url, params=params, timeout=30)
             response.raise_for_status()
             
@@ -111,12 +113,14 @@ class HistoricalDataBootstrapper:
                 "2. high": "high", 
                 "3. low": "low",
                 "4. close": "close",
-                "5. adjusted close": "adjusted_close",
-                "6. volume": "volume",
-                "7. dividend amount": "dividends",
-                "8. split coefficient": "stock_splits"
+                "5. volume": "volume"
             }
             df = df.rename(columns=column_mapping)
+            
+            # Add missing columns for compatibility
+            df['adjusted_close'] = df['close']  # Use close as adjusted close
+            df['dividends'] = 0.0  # Default to 0
+            df['stock_splits'] = 1.0  # Default to 1
             
             # Convert to numeric
             numeric_columns = ["open", "high", "low", "close", "adjusted_close", "volume", "dividends", "stock_splits"]
@@ -269,13 +273,34 @@ class HistoricalDataBootstrapper:
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(description="Bootstrap historical data for S&P 500 tickers")
-    parser.add_argument("--api-key", required=True, help="Alpha Vantage API key")
+    parser.add_argument("--api-key", help="Alpha Vantage API key (will use config file if not provided)")
     parser.add_argument("--output-dir", default="data/raw/historical", help="Output directory")
     parser.add_argument("--batch-size", type=int, default=10, help="Batch size for processing")
     parser.add_argument("--tickers", nargs="+", help="Specific tickers to process (default: all S&P 500)")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
+    parser.add_argument("--config", default="config/settings.yaml", help="Path to configuration file")
     
     args = parser.parse_args()
+    
+    # Load API key from config file if not provided
+    api_key = args.api_key
+    if not api_key:
+        try:
+            import yaml
+            with open(args.config, 'r') as f:
+                config = yaml.safe_load(f)
+            api_key = config.get('alpha_vantage_api_key')
+            if not api_key:
+                print("❌ No API key found in config file and --api-key not provided")
+                print("Please either:")
+                print("1. Add 'alpha_vantage_api_key: your_key' to config/settings.yaml")
+                print("2. Use --api-key command line argument")
+                return 1
+            print(f"✅ Using API key from config file: {api_key[:8]}...")
+        except Exception as e:
+            print(f"❌ Error loading config file: {e}")
+            print("Please provide --api-key argument")
+            return 1
     
     # Setup logging
     logging.basicConfig(
@@ -301,7 +326,7 @@ def main():
     
     # Create bootstrapper
     bootstrapper = HistoricalDataBootstrapper(
-        api_key=args.api_key,
+        api_key=api_key,
         output_dir=output_dir,
         batch_size=args.batch_size
     )

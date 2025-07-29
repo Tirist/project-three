@@ -14,14 +14,31 @@ import json
 import time
 
 def check_api_key():
-    """Check if Alpha Vantage API key is available."""
+    """Check if Alpha Vantage API key is available from config file or environment."""
+    # First try environment variable
     api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
-    if not api_key:
-        print("❌ ALPHA_VANTAGE_API_KEY environment variable not set")
-        print("Please set your Alpha Vantage API key:")
-        print("export ALPHA_VANTAGE_API_KEY='your_api_key_here'")
-        return False
-    return True
+    if api_key:
+        return api_key
+    
+    # Then try config file
+    try:
+        import yaml
+        config_path = Path("config/settings.yaml")
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            api_key = config.get('alpha_vantage_api_key')
+            if api_key:
+                print(f"✅ Using API key from config file: {api_key[:8]}...")
+                return api_key
+    except Exception as e:
+        print(f"⚠️  Error reading config file: {e}")
+    
+    print("❌ No Alpha Vantage API key found")
+    print("Please either:")
+    print("1. Set environment variable: export ALPHA_VANTAGE_API_KEY='your_key'")
+    print("2. Add 'alpha_vantage_api_key: your_key' to config/settings.yaml")
+    return None
 
 def run_bootstrap_demo():
     """Run a demo bootstrap with a small sample of tickers."""
@@ -29,7 +46,8 @@ def run_bootstrap_demo():
     print("=" * 50)
     
     # Check API key
-    if not check_api_key():
+    api_key = check_api_key()
+    if not api_key:
         return False
     
     # Demo tickers (small sample for demonstration)
@@ -42,7 +60,7 @@ def run_bootstrap_demo():
     # Run bootstrap with demo tickers
     cmd = [
         sys.executable, "bootstrap_historical_data.py",
-        "--api-key", os.environ['ALPHA_VANTAGE_API_KEY'],
+        "--api-key", api_key,
         "--tickers"
     ] + demo_tickers + [
         "--batch-size", "2",
