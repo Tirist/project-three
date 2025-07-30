@@ -1,4 +1,29 @@
 #!/usr/bin/env python3
+"""
+Feature Processing Module
+
+This module processes OHLCV (Open, High, Low, Close, Volume) data and adds technical indicators
+for financial analysis. It supports both incremental processing (combining historical and current data)
+and full reprocessing modes.
+
+The module calculates various technical indicators including:
+- Simple Moving Averages (SMA 50, 200)
+- Exponential Moving Averages (EMA 26)
+- MACD (Moving Average Convergence Divergence)
+- RSI (Relative Strength Index)
+- Bollinger Bands
+
+Usage:
+    python pipeline/process_features.py [--test-mode] [--drop-incomplete] [--config CONFIG_PATH]
+
+Features:
+    - Incremental processing with historical data integration
+    - Test mode for development and debugging
+    - Progress tracking and detailed logging
+    - Metadata generation for processing runs
+    - Support for partitioned data storage
+"""
+
 import argparse
 import json
 import yaml
@@ -9,12 +34,10 @@ import numpy as np
 import logging
 import subprocess
 import sys
-import argparse
 import os
 
-# Add utils directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent / "utils"))
-from progress import get_progress_tracker
+# Import from utils directory
+from utils.progress import get_progress_tracker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -234,6 +257,30 @@ class FeatureProcessor:
         return processed_path, metadata_path
 
     def run(self, test_mode=False, drop_incomplete=False):
+        """
+        Run the feature processing pipeline.
+        
+        This method processes OHLCV data files, adds technical indicators, and saves the results
+        to partitioned storage. It supports both test mode (limited processing) and production mode.
+        
+        Args:
+            test_mode (bool): If True, process only a limited number of files (5) and use test directories.
+                             Defaults to False.
+            drop_incomplete (bool): If True, remove tickers with insufficient data rows.
+                                  Defaults to False.
+        
+        Returns:
+            bool: True if processing completed successfully, False otherwise.
+                 Success is defined as processing at least one ticker successfully.
+        
+        Raises:
+            FileNotFoundError: If raw data directory or files are not found.
+        
+        Note:
+            - Processing metadata is saved to logs/features/dt={date}/metadata.json
+            - Processed data is saved to data/processed/dt={date}/features.parquet
+            - In test mode, paths are adjusted to use test directories
+        """
         import time
         start_time = time.time()
         

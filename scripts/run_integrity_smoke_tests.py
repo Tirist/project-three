@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-run_daily_tests.py
+run_integrity_smoke_tests.py
 
 Runs daily integrity checks with smoke tests (5-10 tickers).
 Generates daily integrity reports in logs/integrity_reports/daily/.
 
 Usage:
-    python scripts/run_daily_tests.py
+    python scripts/run_integrity_smoke_tests.py
 """
 
 import subprocess
@@ -105,14 +105,14 @@ def send_notification(message: str, config: Dict[str, Any]) -> None:
     if webhook_url:
         try:
             import requests
-            payload = {"text": f"🚨 Daily Test Failure: {message}"}
+            payload = {"text": f"🚨 Integrity Smoke Test Failure: {message}"}
             requests.post(webhook_url, json=payload, timeout=10)
             logging.info("Notification sent")
         except Exception as e:
             logging.warning(f"Failed to send notification: {e}")
 
 def main() -> int:
-    """Run daily integrity tests."""
+    """Run integrity smoke tests."""
     start_time = time.time()
     
     # Load configuration
@@ -120,10 +120,10 @@ def main() -> int:
     daily_config = config.get('daily_tests', {})
     
     if not daily_config.get('enabled', True):
-        logging.info("Daily tests disabled in configuration")
+        logging.info("Integrity smoke tests disabled in configuration")
         return 0
     
-    print("=== DAILY INTEGRITY TEST RUN ===")
+    print("=== INTEGRITY SMOKE TEST RUN ===")
     print(f"Started at: {datetime.now().isoformat()}")
     
     # Create logs directory if it doesn't exist
@@ -152,14 +152,14 @@ def main() -> int:
     
     # Log results
     if success:
-        logging.info(f"✅ Daily integrity test completed successfully in {total_time:.2f}s")
-        print("✅ Daily integrity test completed successfully")
+        logging.info(f"✅ Integrity smoke test completed successfully in {total_time:.2f}s")
+        print("✅ Integrity smoke test completed successfully")
         print(output)
         return 0
     else:
-        error_msg = f"Daily integrity test failed after {total_time:.2f}s"
+        error_msg = f"Integrity smoke test failed after {total_time:.2f}s"
         logging.error(error_msg)
-        print("❌ Daily integrity test failed")
+        print("❌ Integrity smoke test failed")
         print(f"Error: {output}")
         
         # Send notification on failure
@@ -172,8 +172,8 @@ if __name__ == "__main__":
         exit_code = main()
         sys.exit(exit_code)
     except KeyboardInterrupt:
-        logging.info("Daily test interrupted by user")
+        logging.info("Integrity smoke test interrupted by user")
         sys.exit(1)
     except Exception as e:
-        logging.error(f"Unexpected error in daily test: {e}")
+        logging.error(f"Unexpected error in integrity smoke test: {e}")
         sys.exit(1) 

@@ -186,11 +186,12 @@ Check pipeline status and recent activity.
 import sys
 from pathlib import Path
 
-# Add tools to path
-sys.path.insert(0, str(Path(__file__).parent / "tools" / "monitoring"))
+    # Add project root to path
+    project_root = Path(__file__).parent
+    sys.path.insert(0, str(project_root))
 
-try:
-    from generate_dashboard_report import main as generate_report
+    try:
+        from tools.monitoring.generate_dashboard_report import main as generate_report
     print("🚀 Generating dashboard report...")
     generate_report()
 except ImportError:
@@ -211,11 +212,12 @@ Run basic diagnostics on the pipeline.
 import sys
 from pathlib import Path
 
-# Add tools to path
-sys.path.insert(0, str(Path(__file__).parent / "tools" / "diagnostics"))
+    # Add project root to path
+    project_root = Path(__file__).parent
+    sys.path.insert(0, str(project_root))
 
-try:
-    from investigate_api_issues import main as run_diagnostics
+    try:
+        from tools.diagnostics.investigate_api_issues import main as run_diagnostics
     print("🔍 Running API diagnostics...")
     run_diagnostics()
 except ImportError:
