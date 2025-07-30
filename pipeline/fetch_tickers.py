@@ -13,7 +13,6 @@ Date: 2025-07-18
 import os
 import json
 import time
-import logging
 import argparse
 import shutil
 from datetime import datetime, timedelta
@@ -30,6 +29,8 @@ from pathlib import Path
 # Add utils directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from progress import get_progress_tracker
+from common import create_partition_paths, save_metadata_to_file, cleanup_old_partitions, handle_rate_limit
+from logger import PipelineLogger
 
 
 class TickerFetcher:
@@ -43,7 +44,7 @@ class TickerFetcher:
             config_path: Path to the configuration YAML file
         """
         self.config = self._load_config(config_path)
-        self.setup_logging()
+        self.logger = PipelineLogger("ticker_fetcher", test_mode=self.config.get("test_mode", False))
         
     def _load_config(self, config_path: str) -> Dict:
         """
@@ -87,21 +88,13 @@ class TickerFetcher:
                         config[key] = value
                 return config
         except FileNotFoundError:
-            logging.warning(f"Config file {config_path} not found, using defaults")
+            self.logger.warning(f"Config file {config_path} not found, using defaults")
             return default_config
         except yaml.YAMLError as e:
-            logging.error(f"Error parsing config file: {e}")
+            self.logger.error(f"Error parsing config file: {e}")
             return default_config
     
-    def setup_logging(self):
-        """Setup logging configuration."""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
+
     
     def fetch_sp500_tickers(self) -> Tuple[List[str], List[str]]:
         """
@@ -114,7 +107,7 @@ class TickerFetcher:
         
         for attempt in range(self.config.get("api_retry_attempts", 3)):
             try:
-                logging.info(f"Fetching S&P 500 tickers from Wikipedia (attempt {attempt + 1})")
+                self.logger.info(f"Fetching S&P 500 tickers from Wikipedia (attempt {attempt + 1})")
                 response = requests.get(url, timeout=30)
                 response.raise_for_status()
                 
@@ -141,16 +134,16 @@ class TickerFetcher:
                             company_names.append(company_name)
                 
                 if len(tickers) > 0:
-                    logging.info(f"Successfully fetched {len(tickers)} tickers")
+                    self.logger.info(f"Successfully fetched {len(tickers)} tickers")
                     return tickers, company_names
                 else:
                     raise ValueError("No tickers found in table")
                     
             except Exception as e:
-                logging.error(f"Attempt {attempt + 1} failed: {e}")
+                self.logger.error(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < self.config.get("api_retry_attempts", 3) - 1:
                     delay = self.config.get("api_retry_delay", 1) * (2 ** attempt)
-                    logging.info(f"Retrying in {delay} seconds...")
+                    self.logger.info(f"Retrying in {delay} seconds...")
                     time.sleep(delay)
                 else:
                     raise
@@ -176,7 +169,7 @@ class TickerFetcher:
             if cleaned_ticker:
                 cleaned.append(cleaned_ticker)
         
-        logging.info(f"Cleaned {len(cleaned)} ticker symbols")
+        self.logger.info(f"Cleaned {len(cleaned)} ticker symbols")
         return cleaned
     
     def create_partition_paths(self, date_str: str, test_mode: bool = False) -> Tuple[Path, Path]:
@@ -190,21 +183,7 @@ class TickerFetcher:
         Returns:
             Tuple of (data_path, log_path) Path objects
         """
-        if test_mode:
-            # Use test directories for test mode
-            data_path = Path("data/test/tickers") / f"dt={date_str}"
-            log_path = Path("logs/test/tickers") / f"dt={date_str}"
-        else:
-            # Use production directories
-            data_path = Path(self.config["base_data_path"]) / self.config["ticker_data_path"] / f"dt={date_str}"
-            log_path = Path(self.config["base_log_path"]) / self.config["ticker_log_path"] / f"dt={date_str}"
-        
-        # Ensure directories exist
-        data_path.mkdir(parents=True, exist_ok=True)
-        log_path.mkdir(parents=True, exist_ok=True)
-        
-        logging.info(f"Created partition paths: {data_path}, {log_path}")
-        return data_path, log_path
+        return create_partition_paths(date_str, self.config, "tickers", test_mode)
     
     def save_tickers_csv(self, tickers: List[str], company_names: List[str], data_path: Path, dry_run: bool = False) -> str:
         """
@@ -227,12 +206,12 @@ class TickerFetcher:
         csv_path = data_path / "tickers.csv"
         
         if dry_run:
-            logging.info(f"[DRY RUN] Would save {len(tickers)} tickers to {csv_path}")
+            self.logger.info(f"[DRY RUN] Would save {len(tickers)} tickers to {csv_path}")
             return str(csv_path)
         
         df.to_csv(csv_path, index=False)
         
-        logging.info(f"Saved {len(tickers)} tickers to {csv_path}")
+        self.logger.info(f"Saved {len(tickers)} tickers to {csv_path}")
         return str(csv_path)
     
     def save_metadata(self, metadata: Dict, log_path: Path, dry_run: bool = False) -> str:
@@ -247,17 +226,7 @@ class TickerFetcher:
         Returns:
             Path to the saved metadata file
         """
-        metadata_path = log_path / "metadata.json"
-        
-        if dry_run:
-            logging.info(f"[DRY RUN] Would save metadata to {metadata_path}")
-            return str(metadata_path)
-        
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
-        logging.info(f"Saved metadata to {metadata_path}")
-        return str(metadata_path)
+        return save_metadata_to_file(metadata, log_path, dry_run)
     
     def validate_ticker_count(self, ticker_count: int) -> bool:
         """
@@ -273,10 +242,10 @@ class TickerFetcher:
         max_expected = self.config["max_tickers_expected"]
         
         if min_expected <= ticker_count <= max_expected:
-            logging.info(f"Ticker count validation passed: {ticker_count}")
+            self.logger.info(f"Ticker count validation passed: {ticker_count}")
             return True
         else:
-            logging.warning(f"Ticker count {ticker_count} outside expected range [{min_expected}, {max_expected}]")
+            self.logger.warning(f"Ticker count {ticker_count} outside expected range [{min_expected}, {max_expected}]")
             return False
     
     def check_existing_partition(self, date_str: str, test_mode: bool = False) -> bool:
@@ -294,10 +263,10 @@ class TickerFetcher:
         csv_path = data_path / "tickers.csv"
         
         if csv_path.exists():
-            logging.info(f"Partition already exists: {csv_path}")
+            self.logger.info(f"Partition already exists: {csv_path}")
             return True
         else:
-            logging.info(f"Partition does not exist: {csv_path}")
+            self.logger.info(f"Partition does not exist: {csv_path}")
             return False
     
     def get_previous_ticker_set(self, test_mode: bool = False) -> Set[str]:
@@ -318,13 +287,13 @@ class TickerFetcher:
             try:
                 df = pd.read_csv(csv_path)
                 tickers = set(df['symbol'].tolist())
-                logging.info(f"Found {len(tickers)} tickers from previous day")
+                self.logger.info(f"Found {len(tickers)} tickers from previous day")
                 return tickers
             except Exception as e:
-                logging.warning(f"Could not read previous tickers: {e}")
+                self.logger.warning(f"Could not read previous tickers: {e}")
                 return set()
         else:
-            logging.info("No previous ticker file found")
+            self.logger.info("No previous ticker file found")
             return set()
     
     def calculate_ticker_changes(self, current_tickers: List[str], previous_tickers: Set[str]) -> Tuple[List[str], List[str]]:
@@ -343,9 +312,9 @@ class TickerFetcher:
         removed = list(previous_tickers - current_set)
         
         if added:
-            logging.info(f"Added tickers: {added}")
+            self.logger.info(f"Added tickers: {added}")
         if removed:
-            logging.info(f"Removed tickers: {removed}")
+            self.logger.info(f"Removed tickers: {removed}")
             
         return added, removed
     
@@ -363,23 +332,25 @@ class TickerFetcher:
             Path to the saved diff log file
         """
         diff_data = {
-            "date": datetime.now().isoformat(),
-            "added": added_tickers,
-            "removed": removed_tickers,
+            "run_date": datetime.now().strftime("%Y-%m-%d"),
+            "timestamp": datetime.now().isoformat(),
+            "tickers_added": added_tickers,
+            "tickers_removed": removed_tickers,
             "total_added": len(added_tickers),
-            "total_removed": len(removed_tickers)
+            "total_removed": len(removed_tickers),
+            "net_change": len(added_tickers) - len(removed_tickers)
         }
         
         diff_path = log_path / "diff.json"
         
         if dry_run:
-            logging.info(f"[DRY RUN] Would save diff log to {diff_path}")
+            self.logger.info(f"[DRY RUN] Would save diff log to {diff_path}")
             return str(diff_path)
         
         with open(diff_path, 'w') as f:
             json.dump(diff_data, f, indent=2)
         
-        logging.info(f"Saved ticker diff to {diff_path}")
+        self.logger.info(f"Saved ticker diff to {diff_path}")
         return str(diff_path)
     
     def cleanup_old_partitions(self, dry_run: bool = False, test_mode: bool = False) -> Dict:
@@ -393,82 +364,7 @@ class TickerFetcher:
         Returns:
             Dictionary containing cleanup results
         """
-        retention_days = self.config.get("retention_days", 30)
-        cutoff_date = datetime.now() - timedelta(days=retention_days)
-        
-        if test_mode:
-            base_data_path = Path("data/test/tickers")
-            base_log_path = Path("logs/test/tickers")
-        else:
-            base_data_path = Path(self.config["base_data_path"]) / self.config["ticker_data_path"]
-            base_log_path = Path(self.config["base_log_path"]) / self.config["ticker_log_path"]
-        
-        deleted_partitions = []
-        total_deleted = 0
-        
-        # Clean up data partitions
-        if base_data_path.exists():
-            for partition_dir in base_data_path.iterdir():
-                if partition_dir.is_dir() and partition_dir.name.startswith("dt="):
-                    try:
-                        partition_date_str = partition_dir.name[3:]  # Remove "dt=" prefix
-                        partition_date = datetime.strptime(partition_date_str, "%Y-%m-%d")
-                        
-                        if partition_date < cutoff_date:
-                            if dry_run:
-                                logging.info(f"[DRY RUN] Would delete old partition: {partition_dir}")
-                            else:
-                                shutil.rmtree(partition_dir)
-                                logging.info(f"Deleted old partition: {partition_dir}")
-                            deleted_partitions.append(str(partition_dir))
-                            total_deleted += 1
-                    except ValueError:
-                        logging.warning(f"Could not parse date from partition name: {partition_dir.name}")
-        
-        # Clean up log partitions
-        if base_log_path.exists():
-            for partition_dir in base_log_path.iterdir():
-                if partition_dir.is_dir() and partition_dir.name.startswith("dt="):
-                    try:
-                        partition_date_str = partition_dir.name[3:]  # Remove "dt=" prefix
-                        partition_date = datetime.strptime(partition_date_str, "%Y-%m-%d")
-                        
-                        if partition_date < cutoff_date:
-                            if dry_run:
-                                logging.info(f"[DRY RUN] Would delete old log partition: {partition_dir}")
-                            else:
-                                shutil.rmtree(partition_dir)
-                                logging.info(f"Deleted old log partition: {partition_dir}")
-                            deleted_partitions.append(str(partition_dir))
-                            total_deleted += 1
-                    except ValueError:
-                        logging.warning(f"Could not parse date from log partition name: {partition_dir.name}")
-        
-        # Save cleanup log
-        cleanup_log = {
-            "cleanup_date": datetime.now().isoformat(),
-            "retention_days": retention_days,
-            "cutoff_date": cutoff_date.isoformat(),
-            "deleted_partitions": deleted_partitions,
-            "total_deleted": total_deleted,
-            "dry_run": dry_run,
-            "test_mode": test_mode
-        }
-        
-        if test_mode:
-            cleanup_log_path = Path("logs/test/cleanup")
-        else:
-            cleanup_log_path = Path(self.config["base_log_path"]) / self.config["cleanup_log_path"]
-        
-        cleanup_log_path.mkdir(parents=True, exist_ok=True)
-        cleanup_file = cleanup_log_path / f"cleanup_{datetime.now().strftime('%Y-%m-%d')}.json"
-        
-        if not dry_run:
-            with open(cleanup_file, 'w') as f:
-                json.dump(cleanup_log, f, indent=2)
-            logging.info(f"Saved cleanup log to {cleanup_file}")
-        
-        return cleanup_log
+        return cleanup_old_partitions(self.config, "tickers", dry_run, test_mode)
     
     def handle_rate_limit(self, attempt: int) -> None:
         """
@@ -477,20 +373,7 @@ class TickerFetcher:
         Args:
             attempt: Current attempt number
         """
-        max_hits = self.config.get("max_rate_limit_hits", 10)
-        base_cooldown = self.config.get("base_cooldown_seconds", 1)
-        max_cooldown = self.config.get("max_cooldown_seconds", 60)
-        
-        if attempt >= max_hits:
-            cooldown = max_cooldown
-        else:
-            cooldown = min(base_cooldown * (2 ** attempt), max_cooldown)
-        
-        debug = self.config.get("debug_rate_limit", False)
-        if debug:
-            print(f"[DEBUG-RATE-LIMIT] Simulating rate limit hit. Sleeping for {cooldown} seconds (attempt {attempt})")
-        logging.info(f"Rate limit cooldown: {cooldown} seconds (attempt {attempt})")
-        time.sleep(cooldown)
+        handle_rate_limit(attempt, self.config)
     
     def run(self, force: bool = False, dry_run: bool = False, full_test: bool = False, test: bool = False) -> Dict:
         """
@@ -534,13 +417,13 @@ class TickerFetcher:
         try:
             # Perform cleanup if enabled
             if self.config.get("cleanup_enabled", True):
-                logging.info("Performing retention cleanup...")
+                self.logger.info("Performing retention cleanup...")
                 cleanup_results = self.cleanup_old_partitions(dry_run, test)
-                logging.info(f"Cleanup completed: {cleanup_results['total_deleted']} partitions deleted")
+                self.logger.info(f"Cleanup completed: {cleanup_results['total_deleted']} partitions deleted")
             
             # Check if partition already exists
             if not force and self.check_existing_partition(date_str, test):
-                logging.info("Partition already exists and force=False, skipping fetch")
+                self.logger.info("Partition already exists and force=False, skipping fetch")
                 metadata["status"] = "skipped"
                 metadata["error_message"] = "Partition already exists"
                 return metadata
@@ -553,7 +436,7 @@ class TickerFetcher:
                 # Limit to 5 tickers for test mode
                 tickers = tickers[:5]
                 company_names = company_names[:5]
-                logging.info(f"[TEST MODE] Fetching only 5 tickers for smoke test: {tickers}")
+                self.logger.info(f"[TEST MODE] Fetching only 5 tickers for smoke test: {tickers}")
             
             cleaned_tickers = self.clean_ticker_symbols(tickers)
             
@@ -601,14 +484,14 @@ class TickerFetcher:
                     
                     # Log ticker-by-ticker
                     for ticker in batch_tickers:
-                        logging.info(f"Processed ticker: {ticker}")
+                        self.logger.info(f"Processed ticker: {ticker}")
                     
                     # Sleep between batches (except for test mode)
                     if test and not full_test:
                         # No cooldown for test mode
                         pass
                     elif i + batch_size < len(cleaned_tickers):
-                        logging.info(f"Sleeping for {cooldown} seconds between batches...")
+                        self.logger.info(f"Sleeping for {cooldown} seconds between batches...")
                         time.sleep(cooldown)
                         total_sleep_time += cooldown
                     
@@ -651,7 +534,7 @@ class TickerFetcher:
             if log_path:
                 self.save_metadata(metadata, log_path, dry_run)
             
-            logging.error(f"Ticker fetch failed: {e}")
+            self.logger.error(f"Ticker fetch failed: {e}")
             raise
 
 

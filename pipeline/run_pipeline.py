@@ -29,7 +29,8 @@ from datetime import datetime, timedelta
 
 # Import common utilities
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
-from common import PipelineConfig, DataManager, LogManager, format_time
+from common import PipelineConfig, DataManager, LogManager
+from progress import format_time
 from logger import get_logger, get_structured_logger
 
 LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'

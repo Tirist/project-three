@@ -101,7 +101,7 @@ def test_retention_cleanup():
     # Check cleanup results structure
     required_cleanup_fields = [
         'cleanup_date', 'retention_days', 'cutoff_date',
-        'partitions_deleted', 'total_deleted', 'errors'
+        'deleted_partitions', 'total_deleted', 'dry_run', 'test_mode'
     ]
     
     missing_fields = [field for field in required_cleanup_fields if field not in cleanup_results]

@@ -12,7 +12,6 @@ Date: 2025-07-18
 import os
 import json
 import time
-import logging
 import argparse
 import shutil
 from datetime import datetime, timedelta
@@ -26,6 +25,8 @@ from pathlib import Path
 # Add utils directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from progress import get_progress_tracker
+from common import create_partition_paths, save_metadata_to_file, cleanup_old_partitions, handle_rate_limit
+from logger import PipelineLogger
 import concurrent.futures
 
 # Try to import yfinance, fallback to alpha_vantage if not available
@@ -56,7 +57,7 @@ class OHLCVFetcher:
             config_path: Path to the configuration YAML file
         """
         self.config = self._load_config(config_path)
-        self.setup_logging()
+        self.logger = PipelineLogger("ohlcv_fetcher", test_mode=self.config.get("test_mode", False))
         # Determine mode from environment variable or config
         self.mode = os.environ.get('PIPELINE_MODE', None)
         if self.mode is None:
@@ -64,7 +65,7 @@ class OHLCVFetcher:
                 self.mode = 'test'
             else:
                 self.mode = 'prod'
-        logging.info(f"[PIPELINE MODE] Running in {self.mode.upper()} mode.")
+        self.logger.info(f"[PIPELINE MODE] Running in {self.mode.upper()} mode.")
         
     def _load_config(self, config_path: str) -> Dict:
         """
@@ -111,21 +112,13 @@ class OHLCVFetcher:
                         config[key] = value
                 return config
         except FileNotFoundError:
-            logging.warning(f"Config file {config_path} not found, using defaults")
+            self.logger.warning(f"Config file {config_path} not found, using defaults")
             return default_config
         except yaml.YAMLError as e:
-            logging.error(f"Error parsing config file: {e}")
+            self.logger.error(f"Error parsing config file: {e}")
             return default_config
     
-    def setup_logging(self):
-        """Setup logging configuration."""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
+
     
     def get_latest_ticker_file(self, test_mode: bool = False) -> Optional[Path]:
         """
@@ -143,23 +136,23 @@ class OHLCVFetcher:
             ticker_path = Path(self.config["base_data_path"]) / self.config.get("ticker_data_path", "tickers")
         
         if not ticker_path.exists():
-            logging.error(f"Ticker directory not found: {ticker_path}")
+            self.logger.error(f"Ticker directory not found: {ticker_path}")
             return None
         
         # Find all dt=* directories and get the latest one
         partitions = [d for d in ticker_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
         if not partitions:
-            logging.error(f"No ticker partitions found in {ticker_path}")
+            self.logger.error(f"No ticker partitions found in {ticker_path}")
             return None
         
         latest_partition = max(partitions, key=lambda x: x.name)
         ticker_file = latest_partition / "tickers.csv"
         
         if ticker_file.exists():
-            logging.info(f"Found latest ticker file: {ticker_file}")
+            self.logger.info(f"Found latest ticker file: {ticker_file}")
             return ticker_file
         else:
-            logging.error(f"Ticker file not found: {ticker_file}")
+            self.logger.error(f"Ticker file not found: {ticker_file}")
             return None
     
     def load_tickers(self, ticker_file: Path) -> List[str]:
@@ -175,10 +168,10 @@ class OHLCVFetcher:
         try:
             df = pd.read_csv(ticker_file)
             tickers = df['symbol'].tolist()
-            logging.info(f"Loaded {len(tickers)} tickers from {ticker_file}")
+            self.logger.info(f"Loaded {len(tickers)} tickers from {ticker_file}")
             return tickers
         except Exception as e:
-            logging.error(f"Failed to load tickers from {ticker_file}: {e}")
+            self.logger.error(f"Failed to load tickers from {ticker_file}: {e}")
             return []
     
     def fetch_ohlcv_yfinance(self, ticker: str, days: int) -> Optional[pd.DataFrame]:
@@ -197,7 +190,7 @@ class OHLCVFetcher:
             data = ticker_obj.history(period=f"{days}d")
             
             if data.empty:
-                logging.warning(f"No data returned for {ticker}")
+                self.logger.warning(f"No data returned for {ticker}")
                 return None
             
             # Reset index to make date a column
@@ -209,11 +202,11 @@ class OHLCVFetcher:
             # Add ticker column
             data['ticker'] = ticker
             
-            logging.info(f"Successfully fetched {len(data)} days of data for {ticker} via yfinance")
+            self.logger.info(f"Successfully fetched {len(data)} days of data for {ticker} via yfinance")
             return data
             
         except Exception as e:
-            logging.error(f"Failed to fetch data for {ticker} via yfinance: {e}")
+            self.logger.error(f"Failed to fetch data for {ticker} via yfinance: {e}")
             return None
     
     def fetch_ohlcv_alpha_vantage(self, ticker: str, days: int) -> Optional[pd.DataFrame]:
@@ -228,12 +221,12 @@ class OHLCVFetcher:
             DataFrame with OHLCV data, or None if failed
         """
         if not ALPHA_VANTAGE_AVAILABLE:
-            logging.error("Alpha Vantage not available")
+            self.logger.error("Alpha Vantage not available")
             return None
         
         api_key = self.config.get("alpha_vantage_api_key")
         if not api_key:
-            logging.error("Alpha Vantage API key not configured")
+            self.logger.error("Alpha Vantage API key not configured")
             return None
         
         try:
@@ -247,7 +240,7 @@ class OHLCVFetcher:
                 data = result
             
             if data is None or data.empty:
-                logging.warning(f"No data returned for {ticker}")
+                self.logger.warning(f"No data returned for {ticker}")
                 return None
             
             # Reset index to make date a column
@@ -262,11 +255,11 @@ class OHLCVFetcher:
             # Limit to requested number of days
             data = data.head(days)
             
-            logging.info(f"Successfully fetched {len(data)} days of data for {ticker} via Alpha Vantage")
+            self.logger.info(f"Successfully fetched {len(data)} days of data for {ticker} via Alpha Vantage")
             return data
             
         except Exception as e:
-            logging.error(f"Failed to fetch data for {ticker} via Alpha Vantage: {e}")
+            self.logger.error(f"Failed to fetch data for {ticker} via Alpha Vantage: {e}")
             return None
     
     def fetch_ohlcv_data(self, ticker: str, days: int) -> Optional[pd.DataFrame]:
@@ -292,7 +285,7 @@ class OHLCVFetcher:
             if data is not None:
                 return data
         
-        logging.error(f"Failed to fetch data for {ticker} from all available sources")
+        self.logger.error(f"Failed to fetch data for {ticker} from all available sources")
         return None
     
     def create_partition_paths(self, date_str: str, test_mode: bool = False) -> Tuple[Path, Path]:
@@ -306,21 +299,7 @@ class OHLCVFetcher:
         Returns:
             Tuple of (data_path, log_path)
         """
-        if test_mode:
-            # Use test directories for test mode
-            data_path = Path("data/test/raw") / f"dt={date_str}"
-            log_path = Path("logs/test/fetch") / f"dt={date_str}"
-        else:
-            # Use production directories
-            data_path = Path(self.config["base_data_path"]) / self.config["ohlcv_data_path"] / f"dt={date_str}"
-            log_path = Path(self.config["base_log_path"]) / self.config["ohlcv_log_path"] / f"dt={date_str}"
-        
-        # Ensure directories exist
-        data_path.mkdir(parents=True, exist_ok=True)
-        log_path.mkdir(parents=True, exist_ok=True)
-        
-        logging.info(f"Created partition paths: {data_path}, {log_path}")
-        return data_path, log_path
+        return create_partition_paths(date_str, self.config, "raw", test_mode)
     
     def save_ticker_data(self, ticker: str, data: pd.DataFrame, data_path: Path, dry_run: bool = False) -> bool:
         """
@@ -338,15 +317,15 @@ class OHLCVFetcher:
         csv_path = data_path / f"{ticker}.csv"
         
         if dry_run:
-            logging.info(f"[DRY RUN] Would save {len(data)} rows for {ticker} to {csv_path}")
+            self.logger.info(f"[DRY RUN] Would save {len(data)} rows for {ticker} to {csv_path}")
             return True
         
         try:
             data.to_csv(csv_path, index=False)
-            logging.info(f"Saved {len(data)} rows for {ticker} to {csv_path}")
+            self.logger.info(f"Saved {len(data)} rows for {ticker} to {csv_path}")
             return True
         except Exception as e:
-            logging.error(f"Failed to save data for {ticker}: {e}")
+            self.logger.error(f"Failed to save data for {ticker}: {e}")
             return False
     
     def save_metadata(self, metadata: Dict, log_path: Path, dry_run: bool = False) -> str:
@@ -361,17 +340,7 @@ class OHLCVFetcher:
         Returns:
             Path to the saved metadata file
         """
-        metadata_path = log_path / "metadata.json"
-        
-        if dry_run:
-            logging.info(f"[DRY RUN] Would save metadata to {metadata_path}")
-            return str(metadata_path)
-        
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
-        logging.info(f"Saved metadata to {metadata_path}")
-        return str(metadata_path)
+        return save_metadata_to_file(metadata, log_path, dry_run)
     
     def save_errors(self, errors: List[Dict], log_path: Path, dry_run: bool = False) -> str:
         """
@@ -388,13 +357,13 @@ class OHLCVFetcher:
         errors_path = log_path / "errors.json"
         
         if dry_run:
-            logging.info(f"[DRY RUN] Would save error log to {errors_path}")
+            self.logger.info(f"[DRY RUN] Would save error log to {errors_path}")
             return str(errors_path)
         
         with open(errors_path, 'w') as f:
             json.dump(errors, f, indent=2)
         
-        logging.info(f"Saved error log to {errors_path}")
+        self.logger.info(f"Saved error log to {errors_path}")
         return str(errors_path)
     
     def check_existing_partition(self, date_str: str, test_mode: bool = False) -> bool:
@@ -427,82 +396,7 @@ class OHLCVFetcher:
         Returns:
             Dictionary containing cleanup results
         """
-        retention_days = self.config.get("retention_days", 3)
-        cutoff_date = datetime.now() - timedelta(days=retention_days)
-        
-        if test_mode:
-            base_data_path = Path("data/test/raw")
-            base_log_path = Path("logs/test/fetch")
-        else:
-            base_data_path = Path(self.config["base_data_path"]) / self.config["ohlcv_data_path"]
-            base_log_path = Path(self.config["base_log_path"]) / self.config["ohlcv_log_path"]
-        
-        deleted_partitions = []
-        total_deleted = 0
-        
-        # Clean up data partitions
-        if base_data_path.exists():
-            for partition_dir in base_data_path.iterdir():
-                if partition_dir.is_dir() and partition_dir.name.startswith("dt="):
-                    try:
-                        partition_date_str = partition_dir.name[3:]  # Remove "dt=" prefix
-                        partition_date = datetime.strptime(partition_date_str, "%Y-%m-%d")
-                        
-                        if partition_date < cutoff_date:
-                            if dry_run:
-                                logging.info(f"[DRY RUN] Would delete old partition: {partition_dir}")
-                            else:
-                                shutil.rmtree(partition_dir)
-                                logging.info(f"Deleted old partition: {partition_dir}")
-                            deleted_partitions.append(str(partition_dir))
-                            total_deleted += 1
-                    except ValueError:
-                        logging.warning(f"Could not parse date from partition name: {partition_dir.name}")
-        
-        # Clean up log partitions
-        if base_log_path.exists():
-            for partition_dir in base_log_path.iterdir():
-                if partition_dir.is_dir() and partition_dir.name.startswith("dt="):
-                    try:
-                        partition_date_str = partition_dir.name[3:]  # Remove "dt=" prefix
-                        partition_date = datetime.strptime(partition_date_str, "%Y-%m-%d")
-                        
-                        if partition_date < cutoff_date:
-                            if dry_run:
-                                logging.info(f"[DRY RUN] Would delete old log partition: {partition_dir}")
-                            else:
-                                shutil.rmtree(partition_dir)
-                                logging.info(f"Deleted old log partition: {partition_dir}")
-                            deleted_partitions.append(str(partition_dir))
-                            total_deleted += 1
-                    except ValueError:
-                        logging.warning(f"Could not parse date from log partition name: {partition_dir.name}")
-        
-        # Save cleanup log
-        cleanup_log = {
-            "cleanup_date": datetime.now().isoformat(),
-            "retention_days": retention_days,
-            "cutoff_date": cutoff_date.isoformat(),
-            "deleted_partitions": deleted_partitions,
-            "total_deleted": total_deleted,
-            "dry_run": dry_run,
-            "test_mode": test_mode
-        }
-        
-        if test_mode:
-            cleanup_log_path = Path("logs/test/cleanup")
-        else:
-            cleanup_log_path = Path(self.config["base_log_path"]) / self.config["cleanup_log_path"]
-        
-        cleanup_log_path.mkdir(parents=True, exist_ok=True)
-        cleanup_file = cleanup_log_path / f"cleanup_{datetime.now().strftime('%Y-%m-%d')}.json"
-        
-        if not dry_run:
-            with open(cleanup_file, 'w') as f:
-                json.dump(cleanup_log, f, indent=2)
-            logging.info(f"Saved cleanup log to {cleanup_file}")
-        
-        return cleanup_log
+        return cleanup_old_partitions(self.config, "raw", dry_run, test_mode)
     
     def get_historical_data_path(self, ticker: str) -> Path:
         """
@@ -548,11 +442,11 @@ class OHLCVFetcher:
             combined_df['date'] = pd.to_datetime(combined_df['date'])
             combined_df = combined_df.sort_values('date').reset_index(drop=True)
             
-            logging.debug(f"Loaded {len(combined_df)} historical rows for {ticker}")
+            self.logger.debug(f"Loaded {len(combined_df)} historical rows for {ticker}")
             return combined_df
             
         except Exception as e:
-            logging.error(f"Error loading historical data for {ticker}: {e}")
+            self.logger.error(f"Error loading historical data for {ticker}: {e}")
             return None
     
     def get_latest_date(self, ticker: str) -> Optional[datetime]:
@@ -608,23 +502,23 @@ class OHLCVFetcher:
         
         if latest_date is None:
             # No historical data, fetch recent data
-            logging.info(f"No historical data for {ticker}, fetching {days_back} days")
+            self.logger.info(f"No historical data for {ticker}, fetching {days_back} days")
             return self.fetch_ohlcv_data(ticker, days_back)
         
         # Calculate days since last update
         days_since_last = (datetime.now() - latest_date).days
         
         if days_since_last <= 0:
-            logging.info(f"{ticker} is up to date (last update: {latest_date})")
+            self.logger.info(f"{ticker} is up to date (last update: {latest_date})")
             return None
         
         if days_since_last > days_back:
             # Gap is too large, fetch more data
-            logging.warning(f"Large gap detected for {ticker}: {days_since_last} days, fetching {days_back} days")
+            self.logger.warning(f"Large gap detected for {ticker}: {days_since_last} days, fetching {days_back} days")
             return self.fetch_ohlcv_data(ticker, days_back)
         
         # Fetch incremental data
-        logging.info(f"Fetching {days_since_last} days of incremental data for {ticker}")
+        self.logger.info(f"Fetching {days_since_last} days of incremental data for {ticker}")
         return self.fetch_ohlcv_data(ticker, days_since_last)
     
     def merge_with_historical(self, ticker: str, new_data: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -654,11 +548,11 @@ class OHLCVFetcher:
             combined_df = combined_df.drop_duplicates(subset=['date'], keep='last')
             combined_df = combined_df.sort_values('date').reset_index(drop=True)
             
-            logging.info(f"Merged data for {ticker}: {len(historical_df)} historical + {len(new_data)} new = {len(combined_df)} total")
+            self.logger.info(f"Merged data for {ticker}: {len(historical_df)} historical + {len(new_data)} new = {len(combined_df)} total")
             return combined_df
             
         except Exception as e:
-            logging.error(f"Error merging data for {ticker}: {e}")
+            self.logger.error(f"Error merging data for {ticker}: {e}")
             return None
     
     def save_historical_data(self, ticker: str, df: pd.DataFrame) -> bool:
@@ -687,12 +581,12 @@ class OHLCVFetcher:
                 output_file = year_dir / "data.parquet"
                 year_data.to_parquet(output_file, index=False)
                 
-                logging.debug(f"Saved {len(year_data)} rows for {ticker} year {year}")
+                self.logger.debug(f"Saved {len(year_data)} rows for {ticker} year {year}")
             
             return True
             
         except Exception as e:
-            logging.error(f"Error saving historical data for {ticker}: {e}")
+            self.logger.error(f"Error saving historical data for {ticker}: {e}")
             return False
     
     def handle_rate_limit(self, attempt: int) -> None:
@@ -702,20 +596,7 @@ class OHLCVFetcher:
         Args:
             attempt: Current attempt number
         """
-        max_hits = self.config.get("max_rate_limit_hits", 10)
-        base_cooldown = self.config.get("base_cooldown_seconds", 1)
-        max_cooldown = self.config.get("max_cooldown_seconds", 60)
-        
-        if attempt >= max_hits:
-            cooldown = max_cooldown
-        else:
-            cooldown = min(base_cooldown * (2 ** attempt), max_cooldown)
-        
-        debug = self.config.get("debug_rate_limit", False)
-        if debug:
-            print(f"[DEBUG-RATE-LIMIT] Simulating rate limit hit. Sleeping for {cooldown} seconds (attempt {attempt})")
-        logging.info(f"Rate limit cooldown: {cooldown} seconds (attempt {attempt})")
-        time.sleep(cooldown)
+        handle_rate_limit(attempt, self.config)
     
     def run(self, force: bool = False, test: bool = False, dry_run: bool = False, full_test: bool = False) -> Dict:
         """
@@ -761,13 +642,13 @@ class OHLCVFetcher:
         try:
             # Perform cleanup if enabled
             if self.config.get("cleanup_enabled", True):
-                logging.info("Performing retention cleanup...")
+                self.logger.info("Performing retention cleanup...")
                 cleanup_results = self.cleanup_old_partitions(dry_run, test)
-                logging.info(f"Cleanup completed: {cleanup_results['total_deleted']} partitions deleted")
+                self.logger.info(f"Cleanup completed: {cleanup_results['total_deleted']} partitions deleted")
             
             # Check if partition already exists
             if not force and self.check_existing_partition(date_str, test):
-                logging.info("Partition already exists and force=False, skipping fetch")
+                self.logger.info("Partition already exists and force=False, skipping fetch")
                 metadata["status"] = "skipped"
                 metadata["error_message"] = "Partition already exists"
                 return metadata
@@ -786,11 +667,11 @@ class OHLCVFetcher:
             if test and not full_test:
                 # Limit to 5 tickers for test mode
                 tickers_to_process = all_tickers[:5]
-                logging.info(f"[TEST MODE] Fetching only 5 tickers: {tickers_to_process}")
+                self.logger.info(f"[TEST MODE] Fetching only 5 tickers: {tickers_to_process}")
             else:
                 # Process all tickers
                 tickers_to_process = all_tickers
-                logging.info(f"Fetching data for all {len(tickers_to_process)} tickers")
+                self.logger.info(f"Fetching data for all {len(tickers_to_process)} tickers")
             
             # Create partition paths
             data_path, log_path = self.create_partition_paths(date_str, test)
@@ -815,7 +696,7 @@ class OHLCVFetcher:
                 
                 if parallel_workers > 1:
                     # Parallel processing
-                    logging.info(f"[INFO] Using {parallel_workers} parallel workers for data fetching.")
+                    self.logger.info(f"[INFO] Using {parallel_workers} parallel workers for data fetching.")
                     
                     with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_workers) as executor:
                         # Submit all tasks
@@ -906,7 +787,7 @@ class OHLCVFetcher:
                 if errors:
                     self.save_errors(errors, log_path, dry_run)
             
-            logging.error(f"OHLCV fetch failed: {e}")
+            self.logger.error(f"OHLCV fetch failed: {e}")
             raise
     
     def _fetch_save_ticker(self, ticker, data_path, retention_days, dry_run):
@@ -917,7 +798,7 @@ class OHLCVFetcher:
                 return self.save_ticker_data(ticker, data, data_path, dry_run)
             return False
         except Exception as e:
-            logging.error(f"Error processing {ticker}: {e}")
+            self.logger.error(f"Error processing {ticker}: {e}")
             return False
 
 

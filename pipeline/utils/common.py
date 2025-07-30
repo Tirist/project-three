@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import sys
+import time
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -231,30 +233,218 @@ class LogManager:
         
         return None
 
-def format_time(seconds: float) -> str:
-    """Format time in human-readable format."""
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    elif seconds < 3600:
-        minutes = seconds / 60
-        return f"{minutes:.1f}m"
-    else:
-        hours = seconds / 3600
-        return f"{hours:.1f}h"
+# Reusable utility functions
 
-def format_progress(current: int, total: int, elapsed: float) -> str:
-    """Format progress information."""
-    if total == 0:
-        return "0/0 (0%)"
+def create_partition_paths(date_str: str, config: Dict[str, Any], data_type: str, test_mode: bool = False) -> Tuple[Path, Path]:
+    """
+    Create partitioned folder paths for data and logs.
     
-    percentage = (current / total) * 100
-    if current > 0:
-        eta = (elapsed / current) * (total - current)
-        eta_str = f" ETA: {format_time(eta)}"
+    Args:
+        date_str: Date string in YYYY-MM-DD format
+        config: Configuration dictionary
+        data_type: Type of data ('tickers', 'raw', 'processed')
+        test_mode: If True, use test directories instead of production
+        
+    Returns:
+        Tuple of (data_path, log_path) Path objects
+    """
+    if test_mode:
+        # Use test directories for test mode
+        if data_type == "tickers":
+            data_path = Path("data/test/tickers") / f"dt={date_str}"
+            log_path = Path("logs/test/tickers") / f"dt={date_str}"
+        elif data_type == "raw":
+            data_path = Path("data/test/raw") / f"dt={date_str}"
+            log_path = Path("logs/test/fetch") / f"dt={date_str}"
+        elif data_type == "processed":
+            data_path = Path("data/test/processed") / f"dt={date_str}"
+            log_path = Path("logs/test/features") / f"dt={date_str}"
+        else:
+            raise ValueError(f"Unknown data type: {data_type}")
     else:
-        eta_str = ""
+        # Use production directories
+        base_data_path = config.get("base_data_path", "data/")
+        base_log_path = config.get("base_log_path", "logs/")
+        
+        if data_type == "tickers":
+            data_path = Path(base_data_path) / config.get("ticker_data_path", "tickers") / f"dt={date_str}"
+            log_path = Path(base_log_path) / config.get("ticker_log_path", "tickers") / f"dt={date_str}"
+        elif data_type == "raw":
+            data_path = Path(base_data_path) / config.get("ohlcv_data_path", "raw") / f"dt={date_str}"
+            log_path = Path(base_log_path) / config.get("ohlcv_log_path", "fetch") / f"dt={date_str}"
+        elif data_type == "processed":
+            data_path = Path(base_data_path) / config.get("processed_data_path", "processed") / f"dt={date_str}"
+            log_path = Path(base_log_path) / config.get("features_log_path", "features") / f"dt={date_str}"
+        else:
+            raise ValueError(f"Unknown data type: {data_type}")
     
-    return f"{current}/{total} ({percentage:.1f}%){eta_str}"
+    # Ensure directories exist
+    data_path.mkdir(parents=True, exist_ok=True)
+    log_path.mkdir(parents=True, exist_ok=True)
+    
+    logging.info(f"Created partition paths: {data_path}, {log_path}")
+    return data_path, log_path
+
+def save_metadata_to_file(metadata: Dict[str, Any], log_path: Path, dry_run: bool = False) -> str:
+    """
+    Save metadata to JSON file.
+    
+    Args:
+        metadata: Dictionary containing metadata
+        log_path: Path to save the metadata file
+        dry_run: If True, don't actually save files
+        
+    Returns:
+        Path to the saved metadata file
+    """
+    metadata_path = log_path / "metadata.json"
+    
+    if dry_run:
+        logging.info(f"[DRY RUN] Would save metadata to {metadata_path}")
+        return str(metadata_path)
+    
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2, default=str)
+    
+    logging.info(f"Saved metadata to {metadata_path}")
+    return str(metadata_path)
+
+def cleanup_old_partitions(config: Dict[str, Any], data_type: str, dry_run: bool = False, test_mode: bool = False) -> Dict[str, Any]:
+    """
+    Clean up old partitions based on retention policy.
+    
+    Args:
+        config: Configuration dictionary
+        data_type: Type of data ('tickers', 'raw', 'processed')
+        dry_run: If True, don't actually delete files
+        test_mode: If True, clean test directories
+        
+    Returns:
+        Dictionary containing cleanup results
+    """
+    retention_days = config.get("retention_days", 30)
+    cutoff_date = datetime.now() - timedelta(days=retention_days)
+    
+    if test_mode:
+        if data_type == "tickers":
+            base_data_path = Path("data/test/tickers")
+            base_log_path = Path("logs/test/tickers")
+        elif data_type == "raw":
+            base_data_path = Path("data/test/raw")
+            base_log_path = Path("logs/test/fetch")
+        elif data_type == "processed":
+            base_data_path = Path("data/test/processed")
+            base_log_path = Path("logs/test/features")
+        else:
+            raise ValueError(f"Unknown data type: {data_type}")
+    else:
+        base_data_path = Path(config.get("base_data_path", "data/"))
+        base_log_path = Path(config.get("base_log_path", "logs/"))
+        
+        if data_type == "tickers":
+            base_data_path = base_data_path / config.get("ticker_data_path", "tickers")
+            base_log_path = base_log_path / config.get("ticker_log_path", "tickers")
+        elif data_type == "raw":
+            base_data_path = base_data_path / config.get("ohlcv_data_path", "raw")
+            base_log_path = base_log_path / config.get("ohlcv_log_path", "fetch")
+        elif data_type == "processed":
+            base_data_path = base_data_path / config.get("processed_data_path", "processed")
+            base_log_path = base_log_path / config.get("features_log_path", "features")
+        else:
+            raise ValueError(f"Unknown data type: {data_type}")
+    
+    deleted_partitions = []
+    total_deleted = 0
+    
+    # Clean up data partitions
+    if base_data_path.exists():
+        for partition_dir in base_data_path.iterdir():
+            if partition_dir.is_dir() and partition_dir.name.startswith("dt="):
+                try:
+                    partition_date_str = partition_dir.name[3:]  # Remove "dt=" prefix
+                    partition_date = datetime.strptime(partition_date_str, "%Y-%m-%d")
+                    
+                    if partition_date < cutoff_date:
+                        if dry_run:
+                            logging.info(f"[DRY RUN] Would delete old partition: {partition_dir}")
+                        else:
+                            shutil.rmtree(partition_dir)
+                            logging.info(f"Deleted old partition: {partition_dir}")
+                        deleted_partitions.append(str(partition_dir))
+                        total_deleted += 1
+                except ValueError:
+                    logging.warning(f"Could not parse date from partition name: {partition_dir.name}")
+    
+    # Clean up log partitions
+    if base_log_path.exists():
+        for partition_dir in base_log_path.iterdir():
+            if partition_dir.is_dir() and partition_dir.name.startswith("dt="):
+                try:
+                    partition_date_str = partition_dir.name[3:]  # Remove "dt=" prefix
+                    partition_date = datetime.strptime(partition_date_str, "%Y-%m-%d")
+                    
+                    if partition_date < cutoff_date:
+                        if dry_run:
+                            logging.info(f"[DRY RUN] Would delete old log partition: {partition_dir}")
+                        else:
+                            shutil.rmtree(partition_dir)
+                            logging.info(f"Deleted old log partition: {partition_dir}")
+                        deleted_partitions.append(str(partition_dir))
+                        total_deleted += 1
+                except ValueError:
+                    logging.warning(f"Could not parse date from log partition name: {partition_dir.name}")
+    
+    # Save cleanup log
+    cleanup_log = {
+        "cleanup_date": datetime.now().isoformat(),
+        "retention_days": retention_days,
+        "cutoff_date": cutoff_date.isoformat(),
+        "deleted_partitions": deleted_partitions,
+        "total_deleted": total_deleted,
+        "dry_run": dry_run,
+        "test_mode": test_mode,
+        "data_type": data_type
+    }
+    
+    if test_mode:
+        cleanup_log_path = Path("logs/test/cleanup")
+    else:
+        cleanup_log_path = Path(config.get("base_log_path", "logs/")) / config.get("cleanup_log_path", "cleanup")
+    
+    cleanup_log_path.mkdir(parents=True, exist_ok=True)
+    cleanup_file = cleanup_log_path / f"cleanup_{datetime.now().strftime('%Y-%m-%d')}.json"
+    
+    if not dry_run:
+        with open(cleanup_file, 'w') as f:
+            json.dump(cleanup_log, f, indent=2)
+        logging.info(f"Saved cleanup log to {cleanup_file}")
+    
+    return cleanup_log
+
+def handle_rate_limit(attempt: int, config: Dict[str, Any]) -> None:
+    """
+    Handle rate limiting with exponential backoff.
+    
+    Args:
+        attempt: Current attempt number
+        config: Configuration dictionary
+    """
+    max_hits = config.get("max_rate_limit_hits", 10)
+    base_cooldown = config.get("base_cooldown_seconds", 1)
+    max_cooldown = config.get("max_cooldown_seconds", 60)
+    
+    if attempt >= max_hits:
+        cooldown = max_cooldown
+    else:
+        cooldown = min(base_cooldown * (2 ** attempt), max_cooldown)
+    
+    debug = config.get("debug_rate_limit", False)
+    if debug:
+        print(f"[DEBUG-RATE-LIMIT] Simulating rate limit hit. Sleeping for {cooldown} seconds (attempt {attempt})")
+    logging.info(f"Rate limit cooldown: {cooldown} seconds (attempt {attempt})")
+    time.sleep(cooldown)
+
+
 
 def validate_dataframe(df: pd.DataFrame, required_columns: List[str], 
                       min_rows: int = 0) -> Tuple[bool, List[str]]:
