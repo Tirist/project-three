@@ -25,6 +25,101 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
+def load_config(config_path: str, config_type: str = "general") -> Dict[str, Any]:
+    """
+    Load configuration from YAML file with fallback defaults.
+    
+    Args:
+        config_path: Path to configuration file
+        config_type: Type of configuration ('tickers', 'ohlcv', 'general')
+        
+    Returns:
+        Dictionary containing configuration settings
+    """
+    # Define default configurations for different types
+    default_configs = {
+        "tickers": {
+            "ticker_source": "sp500",
+            "data_source": "wikipedia",
+            "base_data_path": "data/",
+            "base_log_path": "logs/",
+            "ticker_data_path": "tickers",
+            "ticker_log_path": "tickers",
+            "min_tickers_expected": 500,
+            "max_tickers_expected": 510,
+            "api_retry_attempts": 3,
+            "api_retry_delay": 1,
+            "retention_days": 30,
+            "cleanup_enabled": True,
+            "cleanup_log_path": "cleanup",
+            "rate_limit_enabled": True,
+            "rate_limit_strategy": "exponential_backoff",
+            "max_rate_limit_hits": 10,
+            "base_cooldown_seconds": 1,
+            "max_cooldown_seconds": 60,
+            "batch_size": 10,
+            "performance_logging": True
+        },
+        "ohlcv": {
+            "base_data_path": "data/",
+            "base_log_path": "logs/",
+            "ohlcv_data_path": "raw",
+            "ohlcv_log_path": "fetch",
+            "historical_data_path": "raw/historical",
+            "retention_days": 3,
+            "api_retry_attempts": 3,
+            "api_retry_delay": 1,
+            "alpha_vantage_api_key": "",
+            "cleanup_enabled": True,
+            "cleanup_log_path": "cleanup",
+            "rate_limit_enabled": True,
+            "rate_limit_strategy": "exponential_backoff",
+            "max_rate_limit_hits": 10,
+            "base_cooldown_seconds": 1,
+            "max_cooldown_seconds": 60,
+            "batch_size": 10,
+            "performance_logging": True,
+            "progress": True,
+            "parallel_workers": None,
+            "adaptive_reduce_every": 3,
+            "incremental_mode": True,
+            "min_historical_days": 730
+        },
+        "general": {
+            "base_data_path": "data/",
+            "base_log_path": "logs/",
+            "api_retry_attempts": 3,
+            "api_retry_delay": 1,
+            "retention_days": 30,
+            "cleanup_enabled": True,
+            "rate_limit_enabled": True,
+            "rate_limit_strategy": "exponential_backoff",
+            "max_rate_limit_hits": 10,
+            "base_cooldown_seconds": 1,
+            "max_cooldown_seconds": 60,
+            "batch_size": 10,
+            "performance_logging": True
+        }
+    }
+    
+    # Get the appropriate default config
+    default_config = default_configs.get(config_type, default_configs["general"])
+    
+    try:
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+            # Merge with defaults for missing keys
+            for key, value in default_config.items():
+                if key not in config:
+                    config[key] = value
+            return config
+    except FileNotFoundError:
+        logging.warning(f"Config file {config_path} not found, using defaults")
+        return default_config
+    except yaml.YAMLError as e:
+        logging.error(f"Error parsing config file: {e}")
+        return default_config
+
 class PipelineConfig:
     """Centralized configuration management for the pipeline."""
     

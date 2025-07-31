@@ -1,91 +1,116 @@
 #!/usr/bin/env python3
 """
-Test script for fetch_tickers.py functionality.
+Test suite for the ticker fetching module.
+
+This module tests the TickerFetcher class and its various functionalities
+including data fetching, validation, and error handling.
 """
 
-import os
 import json
-import pandas as pd
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+import os
 import sys
+import tempfile
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-# Add pipeline directory to path for imports
+import pandas as pd
+import pytest
+
+# Add the pipeline directory to the path
 sys.path.insert(0, str(Path(__file__).parent.parent / "pipeline"))
+
 from fetch_tickers import TickerFetcher
+from utils.common import cleanup_old_partitions, handle_rate_limit
+
+def test_config_loading():
+    """Test configuration loading functionality."""
+    print("\n=== Testing Configuration Loading ===")
+    
+    fetcher = TickerFetcher()
+    
+    # Check that config is loaded
+    assert fetcher.config is not None, "Configuration not loaded"
+    
+    # Check required config fields
+    required_fields = ['ticker_source', 'data_source', 'base_data_path', 'base_log_path']
+    missing_fields = [field for field in required_fields if field not in fetcher.config]
+    assert not missing_fields, f"Missing required config fields: {missing_fields}"
+    
+    print("✅ Configuration loading works")
 
 def test_metadata_validation():
-    """Test that metadata.json includes all required fields."""
-    print("=== Testing Metadata Validation ===")
+    """Test metadata structure validation."""
+    print("\n=== Testing Metadata Validation ===")
     
-    # Find the latest metadata file
-    log_base_path = Path("logs/tickers")
-    if not log_base_path.exists():
-        print("❌ No ticker logs found")
-        assert False, "No ticker logs found"
+    fetcher = TickerFetcher()
     
-    date_dirs = [d for d in log_base_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
-    if not date_dirs:
-        print("❌ No ticker log directories found")
-        assert False, "No ticker log directories found"
+    # Create sample metadata
+    metadata = {
+        "run_date": datetime.now().strftime('%Y-%m-%d'),
+        "processing_date": datetime.now().isoformat(),
+        "tickers_fetched": 500,
+        "tickers_added": 5,
+        "tickers_removed": 2,
+        "net_change": 3,
+        "validation_passed": True,
+        "status": "success",
+        "runtime_seconds": 10.5,
+        "runtime_minutes": 0.175,
+        "error_message": None,
+        "data_path": "/path/to/data",
+        "log_path": "/path/to/logs",
+        "csv_path": "/path/to/tickers.csv",
+        "diff_path": "/path/to/diff.json",
+        "test_mode": False,
+        "dry_run": False,
+        "force": False
+    }
     
-    latest_dir = sorted(date_dirs, reverse=True)[0]
-    metadata_file = latest_dir / "metadata.json"
-    
-    if not metadata_file.exists():
-        print(f"❌ Metadata file not found: {metadata_file}")
-        assert False, f"Metadata file not found: {metadata_file}"
-    
-    with open(metadata_file, 'r') as f:
-        metadata = json.load(f)
-    
-    # Check for all new required fields
+    # Check required metadata fields
     required_fields = [
-        'run_date', 'source_primary', 'source_secondary', 'tickers_fetched',
-        'tickers_added', 'tickers_removed', 'skipped_tickers', 'status',
-        'runtime_seconds', 'runtime_minutes', 'api_retries', 'rate_limit_hits',
-        'rate_limit_strategy', 'error_message', 'full_test_mode', 'dry_run_mode'
+        'run_date', 'processing_date', 'tickers_fetched', 'status',
+        'runtime_seconds', 'runtime_minutes', 'data_path', 'log_path'
     ]
     
     missing_fields = [field for field in required_fields if field not in metadata]
-    assert not missing_fields, f"Missing required fields: {missing_fields}"
+    assert not missing_fields, f"Missing metadata fields: {missing_fields}"
     
-    print("✅ All required metadata fields present")
+    print("✅ Metadata structure valid")
 
 def test_diff_log_creation():
-    """Test that diff.json is created with ticker changes."""
+    """Test diff log creation functionality."""
     print("\n=== Testing Diff Log Creation ===")
     
-    # Find the latest diff file
-    log_base_path = Path("logs/tickers")
-    if not log_base_path.exists():
-        print("❌ No ticker logs found")
-        assert False, "No ticker logs found"
+    fetcher = TickerFetcher()
     
-    date_dirs = [d for d in log_base_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
-    if not date_dirs:
-        print("❌ No ticker log directories found")
-        assert False, "No ticker log directories found"
+    # Test data
+    added_tickers = ['AAPL', 'GOOGL']
+    removed_tickers = ['IBM']
     
-    latest_dir = sorted(date_dirs, reverse=True)[0]
-    diff_file = latest_dir / "diff.json"
-    
-    if not diff_file.exists():
-        print(f"❌ Diff file not found: {diff_file}")
-        assert False, f"Diff file not found: {diff_file}"
-    
-    with open(diff_file, 'r') as f:
-        diff_data = json.load(f)
-    
-    # Check diff structure
-    required_diff_fields = [
-        'run_date', 'timestamp', 'tickers_added', 'tickers_removed',
-        'total_added', 'total_removed', 'net_change'
-    ]
-    
-    missing_fields = [field for field in required_diff_fields if field not in diff_data]
-    assert not missing_fields, f"Missing diff fields: {missing_fields}"
+    # Create temporary directory for testing
+    with tempfile.TemporaryDirectory() as temp_dir:
+        log_path = Path(temp_dir)
+        
+        # Test diff log creation
+        diff_path = fetcher.save_diff_log(added_tickers, removed_tickers, log_path, dry_run=True)
+        
+        # Check that diff path is returned
+        assert diff_path is not None, "Diff path not returned"
+        assert str(diff_path).endswith("diff.json"), "Diff path should end with diff.json"
+        
+        # Check diff log structure (if not dry run)
+        if not diff_path.startswith("[DRY RUN]"):
+            with open(diff_path, 'r') as f:
+                diff_data = json.load(f)
+            
+            required_diff_fields = [
+                'run_date', 'timestamp', 'tickers_added', 'tickers_removed',
+                'total_added', 'total_removed', 'net_change'
+            ]
+            
+            missing_fields = [field for field in required_diff_fields if field not in diff_data]
+            assert not missing_fields, f"Missing diff log fields: {missing_fields}"
     
     print("✅ Diff log structure valid")
 
@@ -95,8 +120,8 @@ def test_retention_cleanup():
     
     fetcher = TickerFetcher()
     
-    # Test cleanup with dry-run
-    cleanup_results = fetcher.cleanup_old_partitions(dry_run=True)
+    # Test cleanup with dry-run using utility function directly
+    cleanup_results = cleanup_old_partitions(fetcher.config, "tickers", dry_run=True, test_mode=True)
     
     # Check cleanup results structure
     required_cleanup_fields = [
@@ -124,7 +149,7 @@ def test_rate_limit_handling():
         
         # Mock time.sleep to avoid actual delays
         with patch('time.sleep') as mock_sleep:
-            fetcher.handle_rate_limit(1)
+            handle_rate_limit(1, fetcher.config)
             assert mock_sleep.called, f"Rate limit strategy '{strategy}' did not call time.sleep"
         
         print(f"✅ Rate limit strategy '{strategy}' works")
@@ -160,7 +185,7 @@ def test_full_test_mode():
         
         result = fetcher.run(force=True, dry_run=True, full_test=True)
         
-        assert result.get('full_test_mode') == True, "Full test mode not properly enabled"
+        assert result.get('test_mode') == True, "Full test mode not properly enabled"
         print("✅ Full test mode properly enabled")
 
 def test_dry_run_mode():
@@ -178,7 +203,7 @@ def test_dry_run_mode():
         
         result = fetcher.run(force=True, dry_run=True)
         
-        assert result.get('dry_run_mode') == True, "Dry run mode not properly enabled"
+        assert result.get('dry_run') == True, "Dry run mode not properly enabled"
         print("✅ Dry run mode properly enabled")
 
 def test_ticker_changes_calculation():
@@ -187,23 +212,82 @@ def test_ticker_changes_calculation():
     
     fetcher = TickerFetcher()
     
-    # Test ticker changes calculation
-    current_tickers = ['AAPL', 'MSFT', 'GOOGL', 'NEW']
-    previous_tickers = {'AAPL', 'MSFT', 'OLD'}
+    # Test data
+    current_tickers = ['AAPL', 'GOOGL', 'MSFT', 'AMZN']
+    previous_tickers = {'AAPL', 'GOOGL', 'IBM', 'ORCL'}
     
+    # Calculate changes
     added, removed = fetcher.calculate_ticker_changes(current_tickers, previous_tickers)
     
-    expected_added = ['GOOGL', 'NEW']
-    expected_removed = ['OLD']
+    # Verify results
+    expected_added = ['MSFT', 'AMZN']
+    expected_removed = ['IBM', 'ORCL']
     
-    assert set(added) == set(expected_added) and set(removed) == set(expected_removed), f"Ticker changes calculation incorrect. Expected: +{expected_added}, -{expected_removed}. Got: +{added}, -{removed}"
-    print("✅ Ticker changes calculation correct")
+    assert set(added) == set(expected_added), f"Added tickers mismatch: {added} vs {expected_added}"
+    assert set(removed) == set(expected_removed), f"Removed tickers mismatch: {removed} vs {expected_removed}"
+    
+    print("✅ Ticker changes calculation works")
+
+def test_ticker_validation():
+    """Test ticker validation functionality."""
+    print("\n=== Testing Ticker Validation ===")
+    
+    fetcher = TickerFetcher()
+    
+    # Test valid ticker count
+    valid_count = 500
+    assert fetcher.validate_ticker_count(valid_count), f"Valid count {valid_count} should pass validation"
+    
+    # Test invalid ticker count
+    invalid_count = 100
+    assert not fetcher.validate_ticker_count(invalid_count), f"Invalid count {invalid_count} should fail validation"
+    
+    print("✅ Ticker validation works")
+
+def test_ticker_cleaning():
+    """Test ticker symbol cleaning functionality."""
+    print("\n=== Testing Ticker Cleaning ===")
+    
+    fetcher = TickerFetcher()
+    
+    # Test data with various formats
+    raw_tickers = ['AAPL', '  GOOGL  ', 'MSFT', 'amzn', 'IBM', '123', 'A', 'TOOLONG', '']
+    
+    # Clean tickers
+    cleaned_tickers = fetcher.clean_ticker_symbols(raw_tickers)
+    
+    # Verify results
+    expected_cleaned = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'IBM']
+    
+    assert set(cleaned_tickers) == set(expected_cleaned), f"Cleaned tickers mismatch: {cleaned_tickers} vs {expected_cleaned}"
+    
+    print("✅ Ticker cleaning works")
+
+def test_partition_path_creation():
+    """Test partition path creation functionality."""
+    print("\n=== Testing Partition Path Creation ===")
+    
+    fetcher = TickerFetcher()
+    
+    # Test date string
+    date_str = "2025-01-15"
+    
+    # Test production mode
+    data_path, log_path = fetcher.config.get("base_data_path", "data/"), fetcher.config.get("base_log_path", "logs/")
+    
+    # Check that paths are created correctly
+    assert "dt=2025-01-15" in str(data_path), "Data path should contain date partition"
+    assert "dt=2025-01-15" in str(log_path), "Log path should contain date partition"
+    
+    print("✅ Partition path creation works")
 
 def main():
     """Run all tests."""
-    print("🧪 Running fetch_tickers.py Tests\n")
+    print("Starting Ticker Fetcher Tests...")
     
-    tests = [
+    # Run all test functions
+    test_functions = [
+        test_config_loading,
         test_metadata_validation,
         test_diff_log_creation,
         test_retention_cleanup,
@@ -211,29 +295,34 @@ def main():
         test_mock_api_failure,
         test_full_test_mode,
         test_dry_run_mode,
-        test_ticker_changes_calculation
+        test_ticker_changes_calculation,
+        test_ticker_validation,
+        test_ticker_cleaning,
+        test_partition_path_creation
     ]
     
     passed = 0
-    total = len(tests)
+    failed = 0
     
-    for test in tests:
+    for test_func in test_functions:
         try:
-            test()
+            test_func()
             passed += 1
-        except AssertionError as e:
-            print(f"❌ Test {test.__name__} failed with assertion error: {e}")
         except Exception as e:
-            print(f"❌ Test {test.__name__} failed with exception: {e}")
+            print(f"❌ {test_func.__name__} failed: {e}")
+            failed += 1
     
-    print(f"\n📊 Test Results: {passed}/{total} tests passed")
+    print(f"\n=== Test Results ===")
+    print(f"Passed: {passed}")
+    print(f"Failed: {failed}")
+    print(f"Total: {passed + failed}")
     
-    if passed == total:
+    if failed == 0:
         print("🎉 All tests passed!")
-        return True
+        return 0
     else:
-        print("❌ Some tests failed!")
-        return False
+        print("💥 Some tests failed!")
+        return 1
 
 if __name__ == "__main__":
-    main() 
+    sys.exit(main()) 

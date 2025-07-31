@@ -1,158 +1,108 @@
 #!/usr/bin/env python3
 """
-Stock Ticker Fetching Script for MVP Pipeline
+Ticker Fetcher Module
 
-This script fetches the current S&P 500 ticker list from Wikipedia,
-cleans and standardizes the tickers, and saves them to a partitioned
-folder structure with metadata logging.
+This module fetches S&P 500 ticker symbols from Wikipedia and saves them to partitioned storage.
+It supports both test mode (limited processing) and production mode.
 
-Author: Stock Evaluation Pipeline Team
-Date: 2025-07-18
+Usage:
+    python pipeline/fetch_tickers.py [--force] [--dry-run] [--test] [--full-test]
+
+Features:
+    - Fetches S&P 500 tickers from Wikipedia
+    - Validates ticker count against expected range
+    - Tracks changes from previous day
+    - Supports test mode for development
+    - Generates detailed metadata and logs
+    - Automatic cleanup of old partitions
 """
 
-import os
-import json
-import time
 import argparse
-import shutil
+import json
+import logging
+import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Set
+from typing import Dict, List, Set, Tuple
 
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import yaml
-import sys
-from pathlib import Path
 
-# Add utils directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent / "utils"))
-from progress import get_progress_tracker
-from common import create_partition_paths, save_metadata_to_file, cleanup_old_partitions, handle_rate_limit
-from logger import PipelineLogger
+# Import from utils directory
+from utils.common import create_partition_paths, save_metadata_to_file, cleanup_old_partitions, handle_rate_limit, load_config
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class TickerFetcher:
-    """Handles fetching and processing of stock ticker data."""
-    
     def __init__(self, config_path: str = "config/settings.yaml"):
-        """
-        Initialize the TickerFetcher with configuration.
+        self.config = load_config(config_path, "tickers")
+        self.logger = logging.getLogger(__name__)
         
-        Args:
-            config_path: Path to the configuration YAML file
-        """
-        self.config = self._load_config(config_path)
-        self.logger = PipelineLogger("ticker_fetcher", test_mode=self.config.get("test_mode", False))
+        # Set up logging
+        log_dir = Path(self.config.get("base_log_path", "logs/")) / self.config.get("ticker_log_path", "tickers")
+        log_dir.mkdir(parents=True, exist_ok=True)
         
-    def _load_config(self, config_path: str) -> Dict:
-        """
-        Load configuration from YAML file with fallback defaults.
-        
-        Args:
-            config_path: Path to configuration file
-            
-        Returns:
-            Dictionary containing configuration settings
-        """
-        default_config = {
-            "ticker_source": "sp500",
-            "data_source": "wikipedia",
-            "base_data_path": "data/",
-            "base_log_path": "logs/",
-            "ticker_data_path": "tickers",
-            "ticker_log_path": "tickers",
-            "min_tickers_expected": 500,
-            "max_tickers_expected": 510,
-            "api_retry_attempts": 3,
-            "api_retry_delay": 1,
-            "retention_days": 30,
-            "cleanup_enabled": True,
-            "cleanup_log_path": "cleanup",
-            "rate_limit_enabled": True,
-            "rate_limit_strategy": "exponential_backoff",
-            "max_rate_limit_hits": 10,
-            "base_cooldown_seconds": 1,
-            "max_cooldown_seconds": 60,
-            "batch_size": 10,
-            "performance_logging": True
-        }
-        
-        try:
-            with open(config_path, 'r') as file:
-                config = yaml.safe_load(file)
-                # Merge with defaults for missing keys
-                for key, value in default_config.items():
-                    if key not in config:
-                        config[key] = value
-                return config
-        except FileNotFoundError:
-            self.logger.warning(f"Config file {config_path} not found, using defaults")
-            return default_config
-        except yaml.YAMLError as e:
-            self.logger.error(f"Error parsing config file: {e}")
-            return default_config
-    
+        # Determine mode from environment variable or config
+        import os
+        self.mode = os.environ.get('PIPELINE_MODE', None)
+        if self.mode is None:
+            if self.config.get('test_mode', False):
+                self.mode = 'test'
+            else:
+                self.mode = 'prod'
+        self.logger.info(f"[PIPELINE MODE] Running in {self.mode.upper()} mode.")
 
-    
     def fetch_sp500_tickers(self) -> Tuple[List[str], List[str]]:
         """
-        Fetch S&P 500 ticker symbols from Wikipedia.
+        Fetch S&P 500 ticker symbols and company names from Wikipedia.
         
         Returns:
             Tuple of (tickers, company_names) lists
         """
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
         
-        for attempt in range(self.config.get("api_retry_attempts", 3)):
-            try:
-                self.logger.info(f"Fetching S&P 500 tickers from Wikipedia (attempt {attempt + 1})")
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Find the main table with ticker data
-                table = soup.find('table', {'class': 'wikitable'})
-                if not table:
-                    raise ValueError("Could not find ticker table on Wikipedia page")
-                
-                tickers = []
-                company_names = []
-                
-                # Extract ticker symbols and company names from table rows
-                rows = table.find_all('tr')[1:]  # Skip header row
-                for row in rows:
-                    cells = row.find_all('td')
-                    if len(cells) >= 2:
-                        ticker = cells[0].get_text(strip=True)
-                        company_name = cells[1].get_text(strip=True)
-                        
-                        if ticker and company_name:
-                            tickers.append(ticker)
-                            company_names.append(company_name)
-                
-                if len(tickers) > 0:
-                    self.logger.info(f"Successfully fetched {len(tickers)} tickers")
-                    return tickers, company_names
-                else:
-                    raise ValueError("No tickers found in table")
+        try:
+            self.logger.info(f"Fetching S&P 500 tickers from {url}")
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Find the main table with ticker data
+            table = soup.find('table', {'class': 'wikitable'})
+            if not table:
+                raise ValueError("Could not find ticker table on Wikipedia page")
+            
+            tickers = []
+            company_names = []
+            
+            # Extract data from table rows
+            rows = table.find_all('tr')[1:]  # Skip header row
+            for row in rows:
+                cells = row.find_all('td')
+                if len(cells) >= 2:
+                    ticker = cells[0].get_text(strip=True)
+                    company_name = cells[1].get_text(strip=True)
                     
-            except Exception as e:
-                self.logger.error(f"Attempt {attempt + 1} failed: {e}")
-                if attempt < self.config.get("api_retry_attempts", 3) - 1:
-                    delay = self.config.get("api_retry_delay", 1) * (2 ** attempt)
-                    self.logger.info(f"Retrying in {delay} seconds...")
-                    time.sleep(delay)
-                else:
-                    raise
-        
-        raise Exception("Failed to fetch tickers after all retry attempts")
-    
+                    if ticker and company_name:
+                        tickers.append(ticker)
+                        company_names.append(company_name)
+            
+            self.logger.info(f"Successfully fetched {len(tickers)} tickers")
+            return tickers, company_names
+            
+        except requests.RequestException as e:
+            self.logger.error(f"Failed to fetch tickers: {e}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error parsing ticker data: {e}")
+            raise
+
     def clean_ticker_symbols(self, tickers: List[str]) -> List[str]:
         """
-        Clean and standardize ticker symbols.
+        Clean and validate ticker symbols.
         
         Args:
             tickers: List of raw ticker symbols
@@ -162,29 +112,20 @@ class TickerFetcher:
         """
         cleaned = []
         for ticker in tickers:
-            # Remove common suffixes and clean up
+            # Remove any whitespace and convert to uppercase
             cleaned_ticker = ticker.strip().upper()
-            # Remove any non-alphanumeric characters except dots
-            cleaned_ticker = ''.join(c for c in cleaned_ticker if c.isalnum() or c == '.')
-            if cleaned_ticker:
-                cleaned.append(cleaned_ticker)
-        
-        self.logger.info(f"Cleaned {len(cleaned)} ticker symbols")
-        return cleaned
-    
-    def create_partition_paths(self, date_str: str, test_mode: bool = False) -> Tuple[Path, Path]:
-        """
-        Create partitioned folder paths for data and logs.
-        
-        Args:
-            date_str: Date string in YYYY-MM-DD format
-            test_mode: If True, use test directories instead of production
             
-        Returns:
-            Tuple of (data_path, log_path) Path objects
-        """
-        return create_partition_paths(date_str, self.config, "tickers", test_mode)
-    
+            # Basic validation - ticker should be 1-5 characters, alphanumeric
+            if (1 <= len(cleaned_ticker) <= 5 and 
+                cleaned_ticker.isalnum() and 
+                cleaned_ticker not in cleaned):
+                cleaned.append(cleaned_ticker)
+            else:
+                self.logger.warning(f"Invalid ticker symbol: {ticker}")
+        
+        self.logger.info(f"Cleaned {len(cleaned)} valid ticker symbols from {len(tickers)} raw symbols")
+        return cleaned
+
     def save_tickers_csv(self, tickers: List[str], company_names: List[str], data_path: Path, dry_run: bool = False) -> str:
         """
         Save tickers to CSV file.
@@ -213,21 +154,7 @@ class TickerFetcher:
         
         self.logger.info(f"Saved {len(tickers)} tickers to {csv_path}")
         return str(csv_path)
-    
-    def save_metadata(self, metadata: Dict, log_path: Path, dry_run: bool = False) -> str:
-        """
-        Save metadata to JSON file.
-        
-        Args:
-            metadata: Dictionary containing metadata
-            log_path: Path to save the metadata file
-            dry_run: If True, don't actually save files
-            
-        Returns:
-            Path to the saved metadata file
-        """
-        return save_metadata_to_file(metadata, log_path, dry_run)
-    
+
     def validate_ticker_count(self, ticker_count: int) -> bool:
         """
         Validate that the number of tickers is within expected range.
@@ -259,7 +186,7 @@ class TickerFetcher:
         Returns:
             True if partition exists, False otherwise
         """
-        data_path, _ = self.create_partition_paths(date_str, test_mode)
+        data_path, _ = create_partition_paths(date_str, self.config, "tickers", test_mode)
         csv_path = data_path / "tickers.csv"
         
         if csv_path.exists():
@@ -280,7 +207,7 @@ class TickerFetcher:
             Set of ticker symbols from previous day
         """
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        data_path, _ = self.create_partition_paths(yesterday, test_mode)
+        data_path, _ = create_partition_paths(yesterday, self.config, "tickers", test_mode)
         csv_path = data_path / "tickers.csv"
         
         if csv_path.exists():
@@ -352,311 +279,158 @@ class TickerFetcher:
         
         self.logger.info(f"Saved ticker diff to {diff_path}")
         return str(diff_path)
-    
-    def cleanup_old_partitions(self, dry_run: bool = False, test_mode: bool = False) -> Dict:
-        """
-        Clean up old ticker partitions based on retention policy.
-        
-        Args:
-            dry_run: If True, don't actually delete files
-            test_mode: If True, clean test directories
-            
-        Returns:
-            Dictionary containing cleanup results
-        """
-        return cleanup_old_partitions(self.config, "tickers", dry_run, test_mode)
-    
-    def handle_rate_limit(self, attempt: int) -> None:
-        """
-        Handle rate limiting with exponential backoff.
-        
-        Args:
-            attempt: Current attempt number
-        """
-        handle_rate_limit(attempt, self.config)
-    
+
     def run(self, force: bool = False, dry_run: bool = False, full_test: bool = False, test: bool = False) -> Dict:
         """
-        Main execution method for fetching tickers.
+        Run the ticker fetching pipeline.
+        
+        This method fetches S&P 500 ticker symbols from Wikipedia, validates them,
+        and saves them to partitioned storage. It supports both test mode (limited processing)
+        and production mode.
         
         Args:
-            force: If True, re-fetch even if partition exists
-            dry_run: If True, simulate operations without writing files
-            full_test: If True, validate entire ticker universe
-            test: If True, run in test mode (limited tickers, test directories)
-            
+            force (bool): If True, overwrite existing partition. Defaults to False.
+            dry_run (bool): If True, don't actually save files. Defaults to False.
+            full_test (bool): If True, run full test mode. Defaults to False.
+            test (bool): If True, run in test mode. Defaults to False.
+        
         Returns:
-            Dictionary containing execution results and metadata
+            Dict: Dictionary containing run results and metadata
+        
+        Raises:
+            Exception: If ticker fetching fails or validation fails
         """
         start_time = time.time()
+        
+        # Determine test mode
+        test_mode = test or full_test or self.config.get('test_mode', False)
+        
+        # Get current date
         date_str = datetime.now().strftime("%Y-%m-%d")
         
+        # Check if partition already exists
+        if not force and self.check_existing_partition(date_str, test_mode):
+            self.logger.info("Partition already exists and force=False, skipping")
+            return {
+                "status": "skipped",
+                "message": "Partition already exists",
+                "date": date_str,
+                "test_mode": test_mode
+            }
+        
+        # Clean up old partitions if enabled
+        if self.config.get("cleanup_enabled", True):
+            cleanup_results = cleanup_old_partitions(self.config, "tickers", dry_run, test_mode)
+            self.logger.info(f"Cleanup completed: {cleanup_results['total_deleted']} partitions deleted")
+        
+        # Create partition paths
+        data_path, log_path = create_partition_paths(date_str, self.config, "tickers", test_mode)
+        
+        # Fetch tickers with retry logic
+        max_retries = self.config.get("api_retry_attempts", 3)
+        retry_delay = self.config.get("api_retry_delay", 1)
+        
+        for attempt in range(max_retries):
+            try:
+                tickers, company_names = self.fetch_sp500_tickers()
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"Attempt {attempt + 1} failed: {e}")
+                    handle_rate_limit(attempt, self.config)
+                else:
+                    self.logger.error(f"All {max_retries} attempts failed")
+                    raise
+        
+        # Clean ticker symbols
+        cleaned_tickers = self.clean_ticker_symbols(tickers)
+        
+        # Validate ticker count
+        if not self.validate_ticker_count(len(cleaned_tickers)):
+            self.logger.warning("Ticker count validation failed, but continuing")
+        
+        # Get previous tickers for comparison
+        previous_tickers = self.get_previous_ticker_set(test_mode)
+        added_tickers, removed_tickers = self.calculate_ticker_changes(cleaned_tickers, previous_tickers)
+        
+        # Save tickers to CSV
+        csv_path = self.save_tickers_csv(cleaned_tickers, company_names, data_path, dry_run)
+        
+        # Save diff log
+        diff_path = self.save_diff_log(added_tickers, removed_tickers, log_path, dry_run)
+        
+        # Calculate runtime
+        runtime = time.time() - start_time
+        
+        # Prepare metadata
         metadata = {
-            "run_date": date_str,
-            "source_primary": "wikipedia_sp500",
-            "source_secondary": None,
-            "tickers_fetched": 0,
-            "tickers_added": 0,
-            "tickers_removed": 0,
-            "skipped_tickers": 0,
-            "status": "failed",
-            "runtime_seconds": 0,
-            "runtime_minutes": 0,
-            "api_retries": 0,
-            "rate_limit_hits": 0,
-            "rate_limit_strategy": self.config.get("rate_limit_strategy", "exponential_backoff"),
+            "run_date": datetime.now().strftime('%Y-%m-%d'),
+            "processing_date": datetime.now().isoformat(),
+            "tickers_fetched": len(cleaned_tickers),
+            "tickers_added": len(added_tickers),
+            "tickers_removed": len(removed_tickers),
+            "net_change": len(added_tickers) - len(removed_tickers),
+            "validation_passed": self.validate_ticker_count(len(cleaned_tickers)),
+            "status": "success",
+            "runtime_seconds": runtime,
+            "runtime_minutes": runtime / 60,
             "error_message": None,
-            "full_test_mode": full_test,
-            "test_mode": test,
-            "dry_run_mode": dry_run,
-            "total_sleep_time": 0,
-            "batch_size": self.config.get("batch_size", 10)
+            "data_path": str(data_path),
+            "log_path": str(log_path),
+            "csv_path": csv_path,
+            "diff_path": diff_path,
+            "test_mode": test_mode,
+            "dry_run": dry_run,
+            "force": force
         }
         
-        data_path, log_path = None, None
-        try:
-            # Perform cleanup if enabled
-            if self.config.get("cleanup_enabled", True):
-                self.logger.info("Performing retention cleanup...")
-                cleanup_results = self.cleanup_old_partitions(dry_run, test)
-                self.logger.info(f"Cleanup completed: {cleanup_results['total_deleted']} partitions deleted")
-            
-            # Check if partition already exists
-            if not force and self.check_existing_partition(date_str, test):
-                self.logger.info("Partition already exists and force=False, skipping fetch")
-                metadata["status"] = "skipped"
-                metadata["error_message"] = "Partition already exists"
-                return metadata
-            
-            # Fetch tickers (all at once)
-            tickers, company_names = self.fetch_sp500_tickers()
-            
-            # Apply test mode limitations if specified
-            if test and not full_test:
-                # Limit to 5 tickers for test mode
-                tickers = tickers[:5]
-                company_names = company_names[:5]
-                self.logger.info(f"[TEST MODE] Fetching only 5 tickers for smoke test: {tickers}")
-            
-            cleaned_tickers = self.clean_ticker_symbols(tickers)
-            
-            # Create partition paths
-            data_path, log_path = self.create_partition_paths(date_str, test)
-            
-            # Process tickers with progress tracking
-            batch_size = self.config.get("batch_size", 10)
-            cooldown = self.config.get("base_cooldown_seconds", 1)
-            show_progress = self.config.get("progress", True)
-            
-            # Use progress tracker for batch processing
-            total_batches = (len(cleaned_tickers) + batch_size - 1) // batch_size
-            with get_progress_tracker(
-                total=total_batches, 
-                desc="Processing ticker batches", 
-                unit="batch",
-                disable=not show_progress
-            ) as progress:
-                
-                total_sleep_time = 0
-                previous_tickers = self.get_previous_ticker_set(test)
-                added_total, removed_total = [], []
-                
-                for i in range(0, len(cleaned_tickers), batch_size):
-                    batch_tickers = cleaned_tickers[i:i+batch_size]
-                    batch_companies = company_names[i:i+batch_size]
-                    
-                    # Calculate diff for this batch
-                    added, removed = self.calculate_ticker_changes(batch_tickers, previous_tickers)
-                    added_total.extend(added)
-                    removed_total.extend(removed)
-                    
-                    # Save batch to CSV (append or overwrite for first batch)
-                    mode = 'w' if i == 0 else 'a'
-                    df = pd.DataFrame({'symbol': batch_tickers, 'company_name': batch_companies})
-                    csv_path = data_path / "tickers.csv"
-                    
-                    if not dry_run:
-                        df.to_csv(csv_path, mode=mode, header=(i==0), index=False)
-                    
-                    # Save diff log for this batch (overwrite for first batch)
-                    if i == 0:
-                        self.save_diff_log(added_total, removed_total, log_path, dry_run)
-                    
-                    # Log ticker-by-ticker
-                    for ticker in batch_tickers:
-                        self.logger.info(f"Processed ticker: {ticker}")
-                    
-                    # Sleep between batches (except for test mode)
-                    if test and not full_test:
-                        # No cooldown for test mode
-                        pass
-                    elif i + batch_size < len(cleaned_tickers):
-                        self.logger.info(f"Sleeping for {cooldown} seconds between batches...")
-                        time.sleep(cooldown)
-                        total_sleep_time += cooldown
-                    
-                    previous_tickers = set(batch_tickers)
-                    progress.update(1, postfix={"current": f"{min(i+batch_size, len(cleaned_tickers))}/{len(cleaned_tickers)}"})
-            
-            # Update metadata
-            runtime = time.time() - start_time
-            metadata.update({
-                "tickers_fetched": len(cleaned_tickers),
-                "tickers_added": len(added_total),
-                "tickers_removed": len(removed_total),
-                "status": "success",
-                "runtime_seconds": round(runtime, 2),
-                "runtime_minutes": round(runtime / 60, 2),
-                "total_sleep_time": total_sleep_time,
-                "csv_path": str(data_path / "tickers.csv"),
-                "metadata_path": str(log_path / "metadata.json"),
-                "diff_path": str(log_path / "diff.json")
-            })
-            
-            # Save metadata
-            self.save_metadata(metadata, log_path, dry_run)
-            
-            # Validate ticker count
-            if not test:  # Only validate for production runs
-                self.validate_ticker_count(len(cleaned_tickers))
-            
-            return metadata
-            
-        except Exception as e:
-            runtime = time.time() - start_time
-            metadata.update({
-                "status": "failed",
-                "error_message": str(e),
-                "runtime_seconds": round(runtime, 2),
-                "runtime_minutes": round(runtime / 60, 2)
-            })
-            
-            if log_path:
-                self.save_metadata(metadata, log_path, dry_run)
-            
-            self.logger.error(f"Ticker fetch failed: {e}")
-            raise
+        # Save metadata
+        save_metadata_to_file(metadata, log_path, dry_run)
+        
+        # Log summary
+        self.logger.info(f"Ticker fetching completed in {runtime:.2f} seconds")
+        self.logger.info(f"Fetched {len(cleaned_tickers)} tickers")
+        if added_tickers:
+            self.logger.info(f"Added: {added_tickers}")
+        if removed_tickers:
+            self.logger.info(f"Removed: {removed_tickers}")
+        
+        return metadata
 
 
 def main():
-    """Main entry point for the script."""
     parser = argparse.ArgumentParser(description="Fetch S&P 500 ticker symbols")
-    parser.add_argument(
-        "--force", 
-        action="store_true", 
-        help="Force re-fetch even if partition already exists"
-    )
-    parser.add_argument(
-        "--dry-run", 
-        action="store_true", 
-        help="Simulate operations without writing files"
-    )
-    parser.add_argument(
-        "--full-test", 
-        action="store_true", 
-        help="Validate entire ticker universe (detect IPO additions/removals)"
-    )
-    parser.add_argument(
-        "--test", 
-        action="store_true", 
-        help="Test mode: fetch limited tickers and use test directories"
-    )
-    parser.add_argument(
-        "--cooldown", 
-        type=float, 
-        default=None,
-        help="Cooldown (seconds) between API calls or batches (overrides config)"
-    )
-    parser.add_argument(
-        "--batch-size", 
-        type=int, 
-        default=None,
-        help="Number of tickers to process per batch (overrides config)"
-    )
-    parser.add_argument(
-        "--progress", 
-        action="store_true", 
-        help="Show progress bar (enabled by default for full runs)"
-    )
-    parser.add_argument(
-        "--no-progress", 
-        action="store_true", 
-        help="Disable progress bar"
-    )
-    parser.add_argument(
-        "--debug-rate-limit", 
-        action="store_true", 
-        help="Simulate rate limit events and log cooldowns for testing"
-    )
-    parser.add_argument(
-        "--config", 
-        default="config/settings.yaml",
-        help="Path to configuration file"
-    )
+    parser.add_argument("--force", action="store_true", help="Force overwrite existing partition")
+    parser.add_argument("--dry-run", action="store_true", help="Don't actually save files")
+    parser.add_argument("--test", action="store_true", help="Run in test mode")
+    parser.add_argument("--full-test", action="store_true", help="Run full test mode")
+    parser.add_argument("--config", default="config/settings.yaml", help="Path to configuration file")
     
     args = parser.parse_args()
+    
     fetcher = TickerFetcher(args.config)
     
-    # CLI overrides
-    if args.cooldown is not None:
-        fetcher.config['base_cooldown_seconds'] = args.cooldown
-    if args.batch_size is not None:
-        fetcher.config['batch_size'] = args.batch_size
-    
-    # Progress configuration
-    if args.no_progress:
-        fetcher.config['progress'] = False
-    elif args.progress:
-        fetcher.config['progress'] = True
-    else:
-        # Default: enable progress for full runs, disable for test mode
-        fetcher.config['progress'] = not args.test
-    
-    fetcher.config['debug_rate_limit'] = args.debug_rate_limit
-    
-    # Test mode configuration
-    if args.test and not args.full_test:
-        fetcher.config['test_mode'] = True
-        fetcher.config['base_cooldown_seconds'] = 0  # No cooldown for test mode
-        print("[TEST MODE] Fetching limited tickers for smoke test.")
-    else:
-        fetcher.config['test_mode'] = False
-    
-    result = fetcher.run(force=args.force, dry_run=args.dry_run, full_test=args.full_test, test=args.test)
-    
-    # Print summary
-    print(f"\n=== Ticker Fetch Summary ===")
-    print(f"Status: {result['status']}")
-    print(f"Tickers Fetched: {result.get('tickers_fetched', 0)}")
-    if result.get('tickers_added', 0) > 0 or result.get('tickers_removed', 0) > 0:
-        print(f"Ticker Changes: +{result.get('tickers_added', 0)} added, -{result.get('tickers_removed', 0)} removed")
-    print(f"Runtime: {result.get('runtime_seconds', 0)} seconds ({result.get('runtime_minutes', 0):.2f} minutes)")
-    if result.get('api_retries', 0) > 0:
-        print(f"API Retries: {result['api_retries']}")
-    if result.get('rate_limit_hits', 0) > 0:
-        print(f"Rate Limit Hits: {result['rate_limit_hits']}")
-    if result.get('total_sleep_time', 0) > 0:
-        print(f"Total Sleep Time: {result['total_sleep_time']} seconds")
-    if result.get('batch_size', 0) > 0:
-        print(f"Batch Size: {result['batch_size']}")
-    if result.get('cooldown_seconds', 0) > 0:
-        print(f"Cooldown Seconds: {result['cooldown_seconds']}")
-    if result.get('status') == 'success':
-        print(f"Data saved to: {result.get('csv_path','')}")
-        print(f"Metadata saved to: {result.get('metadata_path','')}")
-        if result.get('diff_path'):
-            print(f"Diff log saved to: {result['diff_path']}")
-    elif result.get('status') == 'failed':
-        print(f"Error: {result.get('error_message','')}")
-    
-    # Always print summary log
-    print("--- SUMMARY LOG ---")
-    print(f"Tickers processed: {result.get('tickers_fetched', 0)}")
-    print(f"Total runtime: {result.get('runtime_seconds', 0)} seconds")
-    print(f"Total sleep time: {result.get('total_sleep_time', 0)} seconds")
-    print(f"Errors: {result.get('errors_path', 'N/A')}")
-    
-    sys.exit(0 if result.get('status') in ['success', 'skipped'] else 1)
+    try:
+        result = fetcher.run(
+            force=args.force,
+            dry_run=args.dry_run,
+            full_test=args.full_test,
+            test=args.test
+        )
+        
+        if result["status"] == "success":
+            print("Ticker fetching completed successfully!")
+            sys.exit(0)
+        elif result["status"] == "skipped":
+            print("Ticker fetching skipped (partition already exists)")
+            sys.exit(0)
+        else:
+            print("Ticker fetching failed!")
+            sys.exit(1)
+            
+    except Exception as e:
+        print(f"Ticker fetching failed with error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
