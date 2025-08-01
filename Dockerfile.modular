@@ -1,0 +1,44 @@
+# Dockerfile for Modular Stock Pipeline
+# This demonstrates how to containerize the modular pipeline for cloud deployment
+
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the modular pipeline script
+COPY pipeline/stock_pipeline_modular.py ./pipeline/
+
+# Create data directories
+RUN mkdir -p data/processed data/raw logs
+
+# Set environment variables with defaults
+ENV TICKER_SYMBOLS="AAPL,MSFT,GOOGL,AMZN,TSLA"
+ENV DATA_DAYS="30"
+ENV OUTPUT_PATH="data/processed"
+ENV TEST_MODE="false"
+ENV USE_YFINANCE="true"
+
+# Create a non-root user for security
+RUN useradd -m -u 1000 pipeline && chown -R pipeline:pipeline /app
+USER pipeline
+
+# Set the entrypoint to the modular pipeline
+ENTRYPOINT ["python", "pipeline/stock_pipeline_modular.py"]
+
+# Example usage:
+# docker build -f Dockerfile.modular -t stock-pipeline .
+# docker run -e TICKER_SYMBOLS="AAPL,MSFT" -e TEST_MODE="true" stock-pipeline
+# docker run -v $(pwd)/data:/app/data -e OUTPUT_PATH="/app/data/processed" stock-pipeline 

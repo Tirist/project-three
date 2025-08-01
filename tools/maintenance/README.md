@@ -22,13 +22,13 @@ This script:
 
 ## Deprecated Scripts
 
-The following scripts have been moved to `deprecated/` and should **NOT** be used:
+The following scripts have been removed and should **NOT** be used:
 
-- `DO_NOT_USE_bootstrap_historical_data.py` - Alpha Vantage bootstrap (rate limited)
-- `DO_NOT_USE_bootstrap_yfinance.py` - yfinance bootstrap (redundant)
-- `DO_NOT_USE_demo_bootstrap.py` - Demo script (no longer needed)
-- `DO_NOT_USE_consolidated_bootstrap.py` - Consolidated bootstrap (redundant)
-- `DO_NOT_USE_populate_historical.py` - Historical data population (redundant)
+- `bootstrap_historical_data.py` - Alpha Vantage bootstrap (rate limited, removed)
+- `bootstrap_yfinance.py` - yfinance bootstrap (redundant, removed)
+- `demo_bootstrap.py` - Demo script (no longer needed, removed)
+- `consolidated_bootstrap.py` - Consolidated bootstrap (redundant, removed)
+- `populate_historical.py` - Historical data population (redundant, removed)
 
 ## Why Pipeline Over Bootstrap?
 

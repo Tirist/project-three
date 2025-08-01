@@ -13,8 +13,8 @@
 
 - **`tools/maintenance/`** - Maintenance and cleanup tools
   - `terminate_stuck_run.py` - Terminate stuck pipeline runs
-  - `bootstrap_historical_data.py` - Bootstrap historical data
-  - `demo_bootstrap.py` - Demo bootstrap functionality
+  - `fill_data_gaps.py` - Check and fill data gaps using pipeline
+  - `organize_project.py` - Organize project structure
 
 ### 📊 Reports
 - **`reports/dashboard/`** - Dashboard reports and summaries
@@ -61,7 +61,7 @@
 
 ## 🎯 Next Steps
 
-1. Fix bootstrap rate limiting issues
+1. Use pipeline for data collection (not bootstrap scripts)
 2. Optimize pipeline performance
 3. Implement monitoring system
 

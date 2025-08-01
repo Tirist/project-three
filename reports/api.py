@@ -324,7 +324,7 @@ class PipelineAPIHandler(BaseHTTPRequestHandler):
         """Get information about the next scheduled run."""
         # This would require parsing crontab or checking schedule
         # For now, return a simple estimate
-        return "4:00 AM daily (production), 2:00 AM daily (cleanup)"
+        return "5:30 PM daily (production), 2:00 AM daily (cleanup)"
     
     def _get_data_partition_info(self, data_type: str) -> Dict[str, Any]:
         """Get information about data partitions."""
