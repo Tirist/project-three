@@ -12,12 +12,22 @@ import os
 import sys
 import time
 import shutil
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, BinaryIO
+import io
 
 import pandas as pd
 import yaml
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not available, continue without it
+    pass
 
 # Configure logging
 logging.basicConfig(
@@ -25,9 +35,535 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
+# Storage backend imports (optional dependencies)
+try:
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+    S3_AVAILABLE = True
+except ImportError:
+    S3_AVAILABLE = False
+
+try:
+    from google.cloud import storage
+    from google.cloud.exceptions import NotFound
+    GCS_AVAILABLE = True
+except ImportError:
+    GCS_AVAILABLE = False
+
+try:
+    from azure.storage.blob import BlobServiceClient
+    from azure.core.exceptions import ResourceNotFoundError
+    AZURE_AVAILABLE = True
+except ImportError:
+    AZURE_AVAILABLE = False
+
+class StorageBackend(ABC):
+    """Abstract base class for storage backends."""
+    
+    @abstractmethod
+    def exists(self, path: str) -> bool:
+        """Check if a path exists."""
+        pass
+    
+    @abstractmethod
+    def mkdir(self, path: str, parents: bool = True, exist_ok: bool = True) -> None:
+        """Create a directory."""
+        pass
+    
+    @abstractmethod
+    def listdir(self, path: str) -> List[str]:
+        """List contents of a directory."""
+        pass
+    
+    @abstractmethod
+    def read_file(self, path: str, mode: str = 'r') -> Union[str, bytes]:
+        """Read a file."""
+        pass
+    
+    @abstractmethod
+    def write_file(self, path: str, content: Union[str, bytes], mode: str = 'w') -> None:
+        """Write content to a file."""
+        pass
+    
+    @abstractmethod
+    def delete_file(self, path: str) -> None:
+        """Delete a file."""
+        pass
+    
+    @abstractmethod
+    def delete_directory(self, path: str) -> None:
+        """Delete a directory and its contents."""
+        pass
+    
+    @abstractmethod
+    def get_file_size(self, path: str) -> int:
+        """Get file size in bytes."""
+        pass
+    
+    @abstractmethod
+    def get_last_modified(self, path: str) -> datetime:
+        """Get last modified time of a file."""
+        pass
+
+class LocalStorageBackend(StorageBackend):
+    """Local filesystem storage backend."""
+    
+    def exists(self, path: str) -> bool:
+        return Path(path).exists()
+    
+    def mkdir(self, path: str, parents: bool = True, exist_ok: bool = True) -> None:
+        Path(path).mkdir(parents=parents, exist_ok=exist_ok)
+    
+    def listdir(self, path: str) -> List[str]:
+        path_obj = Path(path)
+        if not path_obj.exists():
+            return []
+        return [item.name for item in path_obj.iterdir()]
+    
+    def read_file(self, path: str, mode: str = 'r') -> Union[str, bytes]:
+        with open(path, mode) as f:
+            return f.read()
+    
+    def write_file(self, path: str, content: Union[str, bytes], mode: str = 'w') -> None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, mode) as f:
+            f.write(content)
+    
+    def delete_file(self, path: str) -> None:
+        Path(path).unlink(missing_ok=True)
+    
+    def delete_directory(self, path: str) -> None:
+        shutil.rmtree(path, ignore_errors=True)
+    
+    def get_file_size(self, path: str) -> int:
+        return Path(path).stat().st_size
+    
+    def get_last_modified(self, path: str) -> datetime:
+        return datetime.fromtimestamp(Path(path).stat().st_mtime)
+
+class S3StorageBackend(StorageBackend):
+    """AWS S3 storage backend."""
+    
+    def __init__(self, bucket_name: str, aws_access_key_id: Optional[str] = None, 
+                 aws_secret_access_key: Optional[str] = None, region_name: Optional[str] = None):
+        if not S3_AVAILABLE:
+            raise ImportError("boto3 is required for S3 storage. Install with: pip install boto3")
+        
+        self.bucket_name = bucket_name
+        self.s3_client = boto3.client(
+            's3',
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            region_name=region_name
+        )
+    
+    def _normalize_path(self, path: str) -> str:
+        """Normalize path for S3 (remove leading slash, handle empty path)."""
+        return path.lstrip('/') if path != '/' else ''
+    
+    def exists(self, path: str) -> bool:
+        try:
+            normalized_path = self._normalize_path(path)
+            if not normalized_path:  # Root bucket
+                return True
+            
+            # Check if it's a file
+            self.s3_client.head_object(Bucket=self.bucket_name, Key=normalized_path)
+            return True
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                # Check if it's a directory (prefix)
+                response = self.s3_client.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=normalized_path.rstrip('/') + '/',
+                    MaxKeys=1
+                )
+                return 'Contents' in response
+            return False
+        except Exception:
+            return False
+    
+    def mkdir(self, path: str, parents: bool = True, exist_ok: bool = True) -> None:
+        # S3 doesn't have real directories, but we can create a placeholder object
+        normalized_path = self._normalize_path(path)
+        if normalized_path and not normalized_path.endswith('/'):
+            normalized_path += '/'
+        
+        if normalized_path:
+            try:
+                self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=normalized_path + '.keep',
+                    Body=''
+                )
+            except Exception as e:
+                if not exist_ok:
+                    raise e
+    
+    def listdir(self, path: str) -> List[str]:
+        normalized_path = self._normalize_path(path)
+        if normalized_path and not normalized_path.endswith('/'):
+            normalized_path += '/'
+        
+        try:
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix=normalized_path,
+                Delimiter='/'
+            )
+            
+            items = []
+            
+            # Add common prefixes (directories)
+            if 'CommonPrefixes' in response:
+                for prefix in response['CommonPrefixes']:
+                    prefix_name = prefix['Prefix'][len(normalized_path):].rstrip('/')
+                    if prefix_name:
+                        items.append(prefix_name)
+            
+            # Add objects (files)
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    obj_name = obj['Key'][len(normalized_path):]
+                    if obj_name and not obj_name.endswith('.keep'):
+                        items.append(obj_name)
+            
+            return items
+        except Exception:
+            return []
+    
+    def read_file(self, path: str, mode: str = 'r') -> Union[str, bytes]:
+        normalized_path = self._normalize_path(path)
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=normalized_path)
+            content = response['Body'].read()
+            
+            if mode == 'r':
+                return content.decode('utf-8')
+            return content
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                raise FileNotFoundError(f"File not found: {path}")
+            raise
+    
+    def write_file(self, path: str, content: Union[str, bytes], mode: str = 'w') -> None:
+        normalized_path = self._normalize_path(path)
+        
+        if mode == 'w' and isinstance(content, str):
+            content = content.encode('utf-8')
+        
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=normalized_path,
+                Body=content
+            )
+        except Exception as e:
+            raise IOError(f"Failed to write file {path}: {e}")
+    
+    def delete_file(self, path: str) -> None:
+        normalized_path = self._normalize_path(path)
+        try:
+            self.s3_client.delete_object(Bucket=self.bucket_name, Key=normalized_path)
+        except Exception:
+            pass  # Ignore errors for missing files
+    
+    def delete_directory(self, path: str) -> None:
+        normalized_path = self._normalize_path(path)
+        if normalized_path and not normalized_path.endswith('/'):
+            normalized_path += '/'
+        
+        try:
+            # List all objects with the prefix
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix=normalized_path
+            )
+            
+            if 'Contents' in response:
+                objects_to_delete = [{'Key': obj['Key']} for obj in response['Contents']]
+                if objects_to_delete:
+                    self.s3_client.delete_objects(
+                        Bucket=self.bucket_name,
+                        Delete={'Objects': objects_to_delete}
+                    )
+        except Exception:
+            pass
+    
+    def get_file_size(self, path: str) -> int:
+        normalized_path = self._normalize_path(path)
+        try:
+            response = self.s3_client.head_object(Bucket=self.bucket_name, Key=normalized_path)
+            return response['ContentLength']
+        except ClientError:
+            return 0
+    
+    def get_last_modified(self, path: str) -> datetime:
+        normalized_path = self._normalize_path(path)
+        try:
+            response = self.s3_client.head_object(Bucket=self.bucket_name, Key=normalized_path)
+            return response['LastModified'].replace(tzinfo=None)
+        except ClientError:
+            return datetime.now()
+
+class GCSStorageBackend(StorageBackend):
+    """Google Cloud Storage backend."""
+    
+    def __init__(self, bucket_name: str, project_id: Optional[str] = None):
+        if not GCS_AVAILABLE:
+            raise ImportError("google-cloud-storage is required for GCS storage. Install with: pip install google-cloud-storage")
+        
+        self.bucket_name = bucket_name
+        self.storage_client = storage.Client(project=project_id)
+        self.bucket = self.storage_client.bucket(bucket_name)
+    
+    def _normalize_path(self, path: str) -> str:
+        """Normalize path for GCS."""
+        return path.lstrip('/') if path != '/' else ''
+    
+    def exists(self, path: str) -> bool:
+        normalized_path = self._normalize_path(path)
+        if not normalized_path:  # Root bucket
+            return True
+        
+        blob = self.bucket.blob(normalized_path)
+        return blob.exists()
+    
+    def mkdir(self, path: str, parents: bool = True, exist_ok: bool = True) -> None:
+        # GCS doesn't have real directories, but we can create a placeholder object
+        normalized_path = self._normalize_path(path)
+        if normalized_path and not normalized_path.endswith('/'):
+            normalized_path += '/'
+        
+        if normalized_path:
+            try:
+                blob = self.bucket.blob(normalized_path + '.keep')
+                blob.upload_from_string('')
+            except Exception as e:
+                if not exist_ok:
+                    raise e
+    
+    def listdir(self, path: str) -> List[str]:
+        normalized_path = self._normalize_path(path)
+        if normalized_path and not normalized_path.endswith('/'):
+            normalized_path += '/'
+        
+        blobs = self.storage_client.list_blobs(self.bucket_name, prefix=normalized_path, delimiter='/')
+        
+        items = []
+        prefixes = set()
+        
+        for blob in blobs:
+            if blob.name.startswith(normalized_path):
+                relative_name = blob.name[len(normalized_path):]
+                if relative_name and not relative_name.endswith('.keep'):
+                    # Remove trailing slash for directories
+                    if relative_name.endswith('/'):
+                        relative_name = relative_name[:-1]
+                    items.append(relative_name)
+        
+        return list(set(items))
+    
+    def read_file(self, path: str, mode: str = 'r') -> Union[str, bytes]:
+        normalized_path = self._normalize_path(path)
+        blob = self.bucket.blob(normalized_path)
+        
+        if not blob.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+        
+        content = blob.download_as_bytes()
+        
+        if mode == 'r':
+            return content.decode('utf-8')
+        return content
+    
+    def write_file(self, path: str, content: Union[str, bytes], mode: str = 'w') -> None:
+        normalized_path = self._normalize_path(path)
+        blob = self.bucket.blob(normalized_path)
+        
+        if mode == 'w' and isinstance(content, str):
+            content = content.encode('utf-8')
+        
+        blob.upload_from_string(content)
+    
+    def delete_file(self, path: str) -> None:
+        normalized_path = self._normalize_path(path)
+        blob = self.bucket.blob(normalized_path)
+        blob.delete(ignore_errors=True)
+    
+    def delete_directory(self, path: str) -> None:
+        normalized_path = self._normalize_path(path)
+        if normalized_path and not normalized_path.endswith('/'):
+            normalized_path += '/'
+        
+        blobs = self.storage_client.list_blobs(self.bucket_name, prefix=normalized_path)
+        for blob in blobs:
+            blob.delete(ignore_errors=True)
+    
+    def get_file_size(self, path: str) -> int:
+        normalized_path = self._normalize_path(path)
+        blob = self.bucket.blob(normalized_path)
+        if blob.exists():
+            blob.reload()
+            return blob.size
+        return 0
+    
+    def get_last_modified(self, path: str) -> datetime:
+        normalized_path = self._normalize_path(path)
+        blob = self.bucket.blob(normalized_path)
+        if blob.exists():
+            blob.reload()
+            return blob.updated.replace(tzinfo=None)
+        return datetime.now()
+
+class DataManager:
+    """Manages data directory structure and file operations with support for multiple storage backends."""
+    
+    def __init__(self, base_dir: str = "data", test_mode: bool = False, 
+                 storage_backend: Optional[StorageBackend] = None):
+        self.base_dir = base_dir
+        self.test_mode = test_mode
+        self.storage = storage_backend or LocalStorageBackend()
+        
+        # Set up directory paths
+        if test_mode:
+            self.data_dir = f"{base_dir}/test"
+        else:
+            self.data_dir = base_dir
+        
+        self.raw_dir = f"{self.data_dir}/raw"
+        self.processed_dir = f"{self.data_dir}/processed"
+        self.tickers_dir = f"{self.data_dir}/tickers"
+        
+        # Create directories if they don't exist
+        self._ensure_directories()
+    
+    def _ensure_directories(self):
+        """Create necessary directories."""
+        for directory in [self.raw_dir, self.processed_dir, self.tickers_dir]:
+            self.storage.mkdir(directory, parents=True, exist_ok=True)
+    
+    def get_partition_path(self, date: Union[str, datetime], data_type: str) -> str:
+        """Get partition path for a specific date and data type."""
+        if isinstance(date, str):
+            date_str = date
+        else:
+            date_str = date.strftime("%Y-%m-%d")
+        
+        partition_name = f"dt={date_str}"
+        
+        if data_type == "raw":
+            return f"{self.raw_dir}/{partition_name}"
+        elif data_type == "processed":
+            return f"{self.processed_dir}/{partition_name}"
+        elif data_type == "tickers":
+            return f"{self.tickers_dir}/{partition_name}"
+        else:
+            raise ValueError(f"Unknown data type: {data_type}")
+    
+    def partition_exists(self, date: Union[str, datetime], data_type: str) -> bool:
+        """Check if a partition exists."""
+        partition_path = self.get_partition_path(date, data_type)
+        return self.storage.exists(partition_path)
+    
+    def list_partitions(self, data_type: str) -> List[str]:
+        """List all partitions for a data type."""
+        base_path = self.get_partition_path("", data_type).rsplit('/', 1)[0]
+        
+        if not self.storage.exists(base_path):
+            return []
+        
+        partitions = []
+        for item in self.storage.listdir(base_path):
+            if item.startswith("dt="):
+                partitions.append(item[3:])  # Remove "dt=" prefix
+        
+        return sorted(partitions)
+    
+    def cleanup_old_partitions(self, retention_days: int, data_type: str) -> int:
+        """Clean up old partitions based on retention policy."""
+        cutoff_date = datetime.now() - timedelta(days=retention_days)
+        deleted_count = 0
+        
+        for partition_date_str in self.list_partitions(data_type):
+            try:
+                partition_date = datetime.strptime(partition_date_str, "%Y-%m-%d")
+                if partition_date < cutoff_date:
+                    partition_path = self.get_partition_path(partition_date_str, data_type)
+                    self.storage.delete_directory(partition_path)
+                    deleted_count += 1
+            except ValueError:
+                continue
+        
+        return deleted_count
+    
+    def save_dataframe(self, df: pd.DataFrame, path: str, format: str = 'parquet') -> None:
+        """Save DataFrame to storage."""
+        if format == 'parquet':
+            buffer = io.BytesIO()
+            df.to_parquet(buffer, index=False)
+            self.storage.write_file(path, buffer.getvalue(), mode='wb')
+        elif format == 'csv':
+            csv_content = df.to_csv(index=False)
+            self.storage.write_file(path, csv_content, mode='w')
+        elif format == 'json':
+            json_content = df.to_json(orient='records', indent=2)
+            self.storage.write_file(path, json_content, mode='w')
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+    
+    def load_dataframe(self, path: str, format: str = 'parquet') -> pd.DataFrame:
+        """Load DataFrame from storage."""
+        if format == 'parquet':
+            content = self.storage.read_file(path, mode='rb')
+            buffer = io.BytesIO(content)
+            return pd.read_parquet(buffer)
+        elif format == 'csv':
+            content = self.storage.read_file(path, mode='r')
+            buffer = io.StringIO(content)
+            return pd.read_csv(buffer)
+        elif format == 'json':
+            content = self.storage.read_file(path, mode='r')
+            buffer = io.StringIO(content)
+            return pd.read_json(buffer, orient='records')
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+    
+    def save_json(self, data: Dict[str, Any], path: str) -> None:
+        """Save JSON data to storage."""
+        json_content = json.dumps(data, indent=2, default=str)
+        self.storage.write_file(path, json_content, mode='w')
+    
+    def load_json(self, path: str) -> Dict[str, Any]:
+        """Load JSON data from storage."""
+        content = self.storage.read_file(path, mode='r')
+        return json.loads(content)
+    
+    def get_storage_info(self) -> Dict[str, Any]:
+        """Get information about the storage backend."""
+        return {
+            "backend_type": type(self.storage).__name__,
+            "base_dir": self.base_dir,
+            "test_mode": self.test_mode,
+            "data_dir": self.data_dir
+        }
+
+# Factory function for creating storage backends
+def create_storage_backend(storage_type: str = "local", **kwargs) -> StorageBackend:
+    """Create a storage backend based on type."""
+    if storage_type == "local":
+        return LocalStorageBackend()
+    elif storage_type == "s3":
+        return S3StorageBackend(**kwargs)
+    elif storage_type == "gcs":
+        return GCSStorageBackend(**kwargs)
+    else:
+        raise ValueError(f"Unsupported storage type: {storage_type}")
+
 def load_config(config_path: str, config_type: str = "general") -> Dict[str, Any]:
     """
     Load configuration from YAML file with fallback defaults.
+    Supports environment variables for sensitive data.
     
     Args:
         config_path: Path to configuration file
@@ -112,13 +648,70 @@ def load_config(config_path: str, config_type: str = "general") -> Dict[str, Any
             for key, value in default_config.items():
                 if key not in config:
                     config[key] = value
-            return config
     except FileNotFoundError:
         logging.warning(f"Config file {config_path} not found, using defaults")
-        return default_config
+        config = default_config
     except yaml.YAMLError as e:
         logging.error(f"Error parsing config file: {e}")
-        return default_config
+        config = default_config
+    
+    # Override sensitive values with environment variables
+    config = _override_with_env_vars(config)
+    
+    return config
+
+def _override_with_env_vars(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Override configuration values with environment variables for sensitive data.
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        Updated configuration dictionary
+    """
+    # API Keys
+    if os.environ.get('ALPHA_VANTAGE_API_KEY'):
+        config['alpha_vantage_api_key'] = os.environ['ALPHA_VANTAGE_API_KEY']
+    
+    # Cloud Storage Configuration
+    if os.environ.get('AWS_ACCESS_KEY_ID'):
+        config['aws_access_key_id'] = os.environ['AWS_ACCESS_KEY_ID']
+    if os.environ.get('AWS_SECRET_ACCESS_KEY'):
+        config['aws_secret_access_key'] = os.environ['AWS_SECRET_ACCESS_KEY']
+    if os.environ.get('AWS_DEFAULT_REGION'):
+        config['aws_default_region'] = os.environ['AWS_DEFAULT_REGION']
+    
+    if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+        config['google_application_credentials'] = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+    
+    if os.environ.get('AZURE_STORAGE_CONNECTION_STRING'):
+        config['azure_storage_connection_string'] = os.environ['AZURE_STORAGE_CONNECTION_STRING']
+    
+    # Database Configuration
+    if os.environ.get('DATABASE_URL'):
+        config['database_url'] = os.environ['DATABASE_URL']
+    
+    # Logging Configuration
+    if os.environ.get('LOG_LEVEL'):
+        config['log_level'] = os.environ['LOG_LEVEL']
+    if os.environ.get('LOG_FILE'):
+        config['log_file'] = os.environ['LOG_FILE']
+    
+    # Performance Configuration
+    if os.environ.get('MAX_WORKERS'):
+        try:
+            config['max_workers'] = int(os.environ['MAX_WORKERS'])
+        except ValueError:
+            logging.warning(f"Invalid MAX_WORKERS value: {os.environ['MAX_WORKERS']}")
+    
+    if os.environ.get('CHUNK_SIZE'):
+        try:
+            config['chunk_size'] = int(os.environ['CHUNK_SIZE'])
+        except ValueError:
+            logging.warning(f"Invalid CHUNK_SIZE value: {os.environ['CHUNK_SIZE']}")
+    
+    return config
 
 class PipelineConfig:
     """Centralized configuration management for the pipeline."""
@@ -151,85 +744,6 @@ class PipelineConfig:
     def get_test_config(self, key: str, default: Any = None) -> Any:
         """Get test configuration value with fallback to default."""
         return self.test_schedules.get(key, default)
-
-class DataManager:
-    """Manages data directory structure and file operations."""
-    
-    def __init__(self, base_dir: str = "data", test_mode: bool = False):
-        self.base_dir = Path(base_dir)
-        self.test_mode = test_mode
-        
-        # Set up directory paths
-        if test_mode:
-            self.data_dir = self.base_dir / "test"
-        else:
-            self.data_dir = self.base_dir
-        
-        self.raw_dir = self.data_dir / "raw"
-        self.processed_dir = self.data_dir / "processed"
-        self.tickers_dir = self.data_dir / "tickers"
-        
-        # Create directories if they don't exist
-        self._ensure_directories()
-    
-    def _ensure_directories(self):
-        """Create necessary directories."""
-        for directory in [self.raw_dir, self.processed_dir, self.tickers_dir]:
-            directory.mkdir(parents=True, exist_ok=True)
-    
-    def get_partition_path(self, date: Union[str, datetime], data_type: str) -> Path:
-        """Get partition path for a specific date and data type."""
-        if isinstance(date, str):
-            date_str = date
-        else:
-            date_str = date.strftime("%Y-%m-%d")
-        
-        partition_name = f"dt={date_str}"
-        
-        if data_type == "raw":
-            return self.raw_dir / partition_name
-        elif data_type == "processed":
-            return self.processed_dir / partition_name
-        elif data_type == "tickers":
-            return self.tickers_dir / partition_name
-        else:
-            raise ValueError(f"Unknown data type: {data_type}")
-    
-    def partition_exists(self, date: Union[str, datetime], data_type: str) -> bool:
-        """Check if a partition exists."""
-        partition_path = self.get_partition_path(date, data_type)
-        return partition_path.exists()
-    
-    def list_partitions(self, data_type: str) -> List[str]:
-        """List all partitions for a data type."""
-        base_path = self.get_partition_path("", data_type).parent
-        if not base_path.exists():
-            return []
-        
-        partitions = []
-        for item in base_path.iterdir():
-            if item.is_dir() and item.name.startswith("dt="):
-                partitions.append(item.name[3:])  # Remove "dt=" prefix
-        
-        return sorted(partitions)
-    
-    def cleanup_old_partitions(self, retention_days: int, data_type: str) -> int:
-        """Clean up old partitions based on retention policy."""
-        cutoff_date = datetime.now() - timedelta(days=retention_days)
-        deleted_count = 0
-        
-        for partition_date_str in self.list_partitions(data_type):
-            try:
-                partition_date = datetime.strptime(partition_date_str, "%Y-%m-%d")
-                if partition_date < cutoff_date:
-                    partition_path = self.get_partition_path(partition_date_str, data_type)
-                    import shutil
-                    shutil.rmtree(partition_path)
-                    deleted_count += 1
-            except ValueError:
-                continue
-        
-        return deleted_count
 
 class LogManager:
     """Manages logging and metadata for the pipeline."""

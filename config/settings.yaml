@@ -20,7 +20,7 @@ retention_days: 3
 # API settings
 api_retry_attempts: 3
 api_retry_delay: 1  # seconds
-alpha_vantage_api_key: "6CVZ0Z8NSWD386W0"  # Add your Alpha Vantage API key here
+# alpha_vantage_api_key: Set via ALPHA_VANTAGE_API_KEY environment variable
 
 # Data validation settings
 min_tickers_expected: 500
