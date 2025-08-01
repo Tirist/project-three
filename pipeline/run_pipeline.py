@@ -208,6 +208,11 @@ def main():
     parser.add_argument('--report-type', choices=['daily', 'weekly'], default='daily', help='Type of integrity report to generate')
     parser.add_argument('--report-path', type=str, help='Custom path for integrity report')
     
+    # Storage provider configuration
+    parser.add_argument('--storage-provider', type=str, choices=['local', 's3', 'gcs', 'azure'], 
+                       default='local', help='Storage provider to use (local, s3, gcs, azure)')
+    parser.add_argument('--storage-config', type=str, help='Path to cloud storage configuration file')
+    
     args = parser.parse_args()
 
     start_time = time.time()
@@ -266,6 +271,50 @@ def main():
     # Determine if we're in test mode
     test_mode = args.test or args.daily_integrity
 
+    # Initialize storage backend and DataManager
+    storage_backend = None
+    data_manager = None
+    
+    try:
+        # Load cloud storage configuration if specified
+        cloud_config = {}
+        if args.storage_config:
+            config_path = args.storage_config
+        else:
+            config_path = "config/cloud_settings.yaml"
+        
+        if Path(config_path).exists():
+            with open(config_path, 'r') as f:
+                import yaml
+                cloud_config = yaml.safe_load(f)
+        
+        # Create storage backend based on provider
+        if args.storage_provider != 'local':
+            # Get provider-specific configuration
+            provider_config = cloud_config.get(args.storage_provider, {})
+            
+            # Create storage backend
+            storage_backend = create_storage_backend(
+                storage_type=args.storage_provider,
+                **provider_config
+            )
+            
+            print(f"Initialized {args.storage_provider.upper()} storage backend")
+        
+        # Initialize DataManager with storage backend
+        data_manager = DataManager(
+            base_dir="data",
+            test_mode=test_mode,
+            storage_backend=storage_backend
+        )
+        
+        print(f"DataManager initialized with {args.storage_provider} storage")
+        
+    except Exception as e:
+        print(f"Warning: Failed to initialize storage backend: {e}")
+        print("Falling back to local storage")
+        data_manager = DataManager(base_dir="data", test_mode=test_mode)
+
     # PROD MODE BANNER
     if args.prod:
         print("\n=== PROD RUN START ===\n")
@@ -282,6 +331,13 @@ def main():
 
     # 1. fetch_tickers.py - Always fetch full ticker list by default
     ticker_cmd = [sys.executable, 'pipeline/fetch_tickers.py', '--force']
+    
+    # Add storage provider arguments
+    if args.storage_provider != 'local':
+        ticker_cmd.extend(['--storage-provider', args.storage_provider])
+    if args.storage_config:
+        ticker_cmd.extend(['--storage-config', args.storage_config])
+    
     if args.prod:
         # Production mode: full ticker pull, no test flags
         if '--force' not in ticker_cmd:
@@ -311,6 +367,13 @@ def main():
 
     # 2. fetch_data.py - Fetch OHLCV data for all tickers
     data_cmd = [sys.executable, 'pipeline/fetch_data.py', '--progress']
+    
+    # Add storage provider arguments
+    if args.storage_provider != 'local':
+        data_cmd.extend(['--storage-provider', args.storage_provider])
+    if args.storage_config:
+        data_cmd.extend(['--storage-config', args.storage_config])
+    
     if args.prod:
         # Production mode: full data fetch
         pass  # No additional flags needed
@@ -341,6 +404,13 @@ def main():
 
     # 3. process_features.py - Process features and create parquet file
     features_cmd = [sys.executable, 'pipeline/process_features.py']
+    
+    # Add storage provider arguments
+    if args.storage_provider != 'local':
+        features_cmd.extend(['--storage-provider', args.storage_provider])
+    if args.storage_config:
+        features_cmd.extend(['--storage-config', args.storage_config])
+    
     if args.prod:
         # Production mode: full feature processing
         features_cmd.append('--drop-incomplete')

@@ -2,6 +2,24 @@
 
 The `DataManager` class has been extended to support multiple storage backends, including cloud storage providers. This allows for seamless migration from local filesystem storage to cloud storage while maintaining the same API.
 
+## Quick Start
+
+Use the `--storage-provider` argument to specify your storage backend:
+
+```bash
+# Use local storage (default)
+python pipeline/run_pipeline.py --test
+
+# Use AWS S3
+python pipeline/run_pipeline.py --test --storage-provider s3
+
+# Use Google Cloud Storage
+python pipeline/run_pipeline.py --test --storage-provider gcs
+
+# Use custom configuration file
+python pipeline/run_pipeline.py --test --storage-provider s3 --storage-config config/my_cloud_settings.yaml
+```
+
 ## Overview
 
 The new architecture uses a pluggable storage backend system with the following components:
@@ -11,6 +29,48 @@ The new architecture uses a pluggable storage backend system with the following 
 - **S3StorageBackend**: Implementation for AWS S3 storage
 - **GCSStorageBackend**: Implementation for Google Cloud Storage
 - **DataManager**: High-level interface that works with any storage backend
+
+## Command Line Interface
+
+### Storage Provider Arguments
+
+The pipeline now supports configurable storage backends through command line arguments:
+
+#### `run_pipeline.py`
+```bash
+python pipeline/run_pipeline.py [OPTIONS] --storage-provider {local,s3,gcs,azure} [--storage-config PATH]
+```
+
+**Arguments:**
+- `--storage-provider`: Choose storage backend (`local`, `s3`, `gcs`, `azure`)
+- `--storage-config`: Path to custom cloud configuration file (optional)
+
+#### Individual Pipeline Modules
+Each pipeline module also supports storage configuration:
+
+```bash
+# fetch_tickers.py
+python pipeline/fetch_tickers.py --storage-provider s3 --storage-config config/cloud_settings.yaml
+
+# fetch_data.py  
+python pipeline/fetch_data.py --storage-provider gcs --storage-config config/cloud_settings.yaml
+
+# process_features.py
+python pipeline/process_features.py --storage-provider s3 --storage-config config/cloud_settings.yaml
+```
+
+### Examples
+
+```bash
+# Test run with S3 storage
+python pipeline/run_pipeline.py --test --storage-provider s3
+
+# Production run with GCS storage
+python pipeline/run_pipeline.py --prod --storage-provider gcs
+
+# Full test with custom config
+python pipeline/run_pipeline.py --full-test --storage-provider s3 --storage-config config/prod_cloud.yaml
+```
 
 ## Configuration
 

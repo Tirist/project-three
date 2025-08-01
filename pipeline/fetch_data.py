@@ -32,15 +32,55 @@ import pandas as pd
 import yfinance as yf
 
 # Import from utils directory
-from utils.common import create_partition_paths, save_metadata_to_file, cleanup_old_partitions, handle_rate_limit, load_config
+from utils.common import create_partition_paths, save_metadata_to_file, cleanup_old_partitions, handle_rate_limit, load_config, DataManager, create_storage_backend
 from utils.progress import get_progress_tracker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class OHLCVFetcher:
-    def __init__(self, config_path: str = "config/settings.yaml"):
+    def __init__(self, config_path: str = "config/settings.yaml", storage_provider: str = "local", storage_config_path: str = None):
         self.config = load_config(config_path, "ohlcv")
         self.logger = logging.getLogger(__name__)
+        
+        # Initialize storage backend and DataManager
+        self.storage_provider = storage_provider
+        self.data_manager = None
+        
+        try:
+            # Load cloud storage configuration if specified
+            cloud_config = {}
+            if storage_config_path and Path(storage_config_path).exists():
+                with open(storage_config_path, 'r') as f:
+                    import yaml
+                    cloud_config = yaml.safe_load(f)
+            
+            # Create storage backend based on provider
+            storage_backend = None
+            if storage_provider != 'local':
+                # Get provider-specific configuration
+                provider_config = cloud_config.get(storage_provider, {})
+                
+                # Create storage backend
+                storage_backend = create_storage_backend(
+                    storage_type=storage_provider,
+                    **provider_config
+                )
+                
+                self.logger.info(f"Initialized {storage_provider.upper()} storage backend")
+            
+            # Initialize DataManager with storage backend
+            self.data_manager = DataManager(
+                base_dir="data",
+                test_mode=False,  # Will be set in run() method
+                storage_backend=storage_backend
+            )
+            
+            self.logger.info(f"DataManager initialized with {storage_provider} storage")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize storage backend: {e}")
+            self.logger.info("Falling back to local storage")
+            self.data_manager = DataManager(base_dir="data", test_mode=False)
         
         # Set up logging
         log_dir = Path(self.config.get("base_log_path", "logs/")) / self.config.get("ohlcv_log_path", "fetch")
@@ -715,9 +755,18 @@ def main():
     parser.add_argument("--progress", action="store_true", help="Show progress bar (enabled by default for full runs)")
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bar")
     
+    # Storage provider configuration
+    parser.add_argument('--storage-provider', type=str, choices=['local', 's3', 'gcs', 'azure'], 
+                       default='local', help='Storage provider to use (local, s3, gcs, azure)')
+    parser.add_argument('--storage-config', type=str, help='Path to cloud storage configuration file')
+    
     args = parser.parse_args()
     
-    fetcher = OHLCVFetcher(args.config)
+    fetcher = OHLCVFetcher(
+        config_path=args.config,
+        storage_provider=args.storage_provider,
+        storage_config_path=args.storage_config
+    )
     
     # Progress configuration
     if args.no_progress:

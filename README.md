@@ -46,6 +46,19 @@ python pipeline/run_pipeline.py --prod  # Production mode (503 tickers)
 python scripts/check_status.py
 ```
 
+### Option 3: Cloud Storage
+
+```bash
+# Use AWS S3
+python pipeline/run_pipeline.py --test --storage-provider s3
+
+# Use Google Cloud Storage
+python pipeline/run_pipeline.py --test --storage-provider gcs
+
+# Use custom cloud configuration
+python pipeline/run_pipeline.py --test --storage-provider s3 --storage-config config/my_cloud.yaml
+```
+
 ## 📊 Key Features
 
 - **Automated Scheduling**: Daily production runs and weekly integrity checks
@@ -54,6 +67,7 @@ python scripts/check_status.py
 - **Monitoring & Alerts**: Real-time pipeline status and failure notifications
 - **Data Quality**: Integrity reports and validation checks
 - **Scalable Architecture**: Partitioned data storage and parallel processing
+- **Cloud Storage Support**: Configurable storage backends (local, S3, GCS, Azure)
 
 ## 📁 Project Structure
 
@@ -106,7 +120,7 @@ python -m pytest tests/test_process_features.py -v
 ## 📈 Pipeline Status
 
 The pipeline runs automatically:
-- **Daily (4:00 AM)**: Full production run with integrity checks
+- **Daily (5:30 PM ET)**: Full production run with integrity checks (after market close)
 - **Weekly**: Comprehensive analysis and reporting
 - **Continuous**: Real-time monitoring and alerts
 

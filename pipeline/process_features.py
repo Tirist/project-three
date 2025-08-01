@@ -420,6 +420,11 @@ def main():
     parser.add_argument("--progress", action="store_true", help="Show progress bar (enabled by default for full runs)")
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bar")
     
+    # Storage provider configuration
+    parser.add_argument('--storage-provider', type=str, choices=['local', 's3', 'gcs', 'azure'], 
+                       default='local', help='Storage provider to use (local, s3, gcs, azure)')
+    parser.add_argument('--storage-config', type=str, help='Path to cloud storage configuration file')
+    
     args = parser.parse_args()
     
     processor = FeatureProcessor(args.config)

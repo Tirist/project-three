@@ -31,14 +31,54 @@ import requests
 from bs4 import BeautifulSoup
 
 # Import from utils directory
-from utils.common import create_partition_paths, save_metadata_to_file, cleanup_old_partitions, handle_rate_limit, load_config
+from utils.common import create_partition_paths, save_metadata_to_file, cleanup_old_partitions, handle_rate_limit, load_config, DataManager, create_storage_backend
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class TickerFetcher:
-    def __init__(self, config_path: str = "config/settings.yaml"):
+    def __init__(self, config_path: str = "config/settings.yaml", storage_provider: str = "local", storage_config_path: str = None):
         self.config = load_config(config_path, "tickers")
         self.logger = logging.getLogger(__name__)
+        
+        # Initialize storage backend and DataManager
+        self.storage_provider = storage_provider
+        self.data_manager = None
+        
+        try:
+            # Load cloud storage configuration if specified
+            cloud_config = {}
+            if storage_config_path and Path(storage_config_path).exists():
+                with open(storage_config_path, 'r') as f:
+                    import yaml
+                    cloud_config = yaml.safe_load(f)
+            
+            # Create storage backend based on provider
+            storage_backend = None
+            if storage_provider != 'local':
+                # Get provider-specific configuration
+                provider_config = cloud_config.get(storage_provider, {})
+                
+                # Create storage backend
+                storage_backend = create_storage_backend(
+                    storage_type=storage_provider,
+                    **provider_config
+                )
+                
+                self.logger.info(f"Initialized {storage_provider.upper()} storage backend")
+            
+            # Initialize DataManager with storage backend
+            self.data_manager = DataManager(
+                base_dir="data",
+                test_mode=False,  # Will be set in run() method
+                storage_backend=storage_backend
+            )
+            
+            self.logger.info(f"DataManager initialized with {storage_provider} storage")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize storage backend: {e}")
+            self.logger.info("Falling back to local storage")
+            self.data_manager = DataManager(base_dir="data", test_mode=False)
         
         # Set up logging
         log_dir = Path(self.config.get("base_log_path", "logs/")) / self.config.get("ticker_log_path", "tickers")
@@ -150,7 +190,11 @@ class TickerFetcher:
             self.logger.info(f"[DRY RUN] Would save {len(tickers)} tickers to {csv_path}")
             return str(csv_path)
         
-        df.to_csv(csv_path, index=False)
+        # Use DataManager if available, otherwise fall back to direct file operations
+        if self.data_manager:
+            self.data_manager.save_dataframe(df, str(csv_path), format='csv')
+        else:
+            df.to_csv(csv_path, index=False)
         
         self.logger.info(f"Saved {len(tickers)} tickers to {csv_path}")
         return str(csv_path)
@@ -186,15 +230,28 @@ class TickerFetcher:
         Returns:
             True if partition exists, False otherwise
         """
-        data_path, _ = create_partition_paths(date_str, self.config, "tickers", test_mode)
-        csv_path = data_path / "tickers.csv"
-        
-        if csv_path.exists():
-            self.logger.info(f"Partition already exists: {csv_path}")
-            return True
+        if self.data_manager:
+            # Use DataManager to check partition existence
+            partition_path = self.data_manager.get_partition_path(date_str, "tickers")
+            csv_path = f"{partition_path}/tickers.csv"
+            exists = self.data_manager.storage.exists(csv_path)
+            
+            if exists:
+                self.logger.info(f"Partition already exists: {csv_path}")
+            else:
+                self.logger.info(f"Partition does not exist: {csv_path}")
+            return exists
         else:
-            self.logger.info(f"Partition does not exist: {csv_path}")
-            return False
+            # Fall back to original method
+            data_path, _ = create_partition_paths(date_str, self.config, "tickers", test_mode)
+            csv_path = data_path / "tickers.csv"
+            
+            if csv_path.exists():
+                self.logger.info(f"Partition already exists: {csv_path}")
+                return True
+            else:
+                self.logger.info(f"Partition does not exist: {csv_path}")
+                return False
     
     def get_previous_ticker_set(self, test_mode: bool = False) -> Set[str]:
         """
@@ -207,21 +264,41 @@ class TickerFetcher:
             Set of ticker symbols from previous day
         """
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        data_path, _ = create_partition_paths(yesterday, self.config, "tickers", test_mode)
-        csv_path = data_path / "tickers.csv"
         
-        if csv_path.exists():
-            try:
-                df = pd.read_csv(csv_path)
-                tickers = set(df['symbol'].tolist())
-                self.logger.info(f"Found {len(tickers)} tickers from previous day")
-                return tickers
-            except Exception as e:
-                self.logger.warning(f"Could not read previous tickers: {e}")
+        if self.data_manager:
+            # Use DataManager to read previous tickers
+            partition_path = self.data_manager.get_partition_path(yesterday, "tickers")
+            csv_path = f"{partition_path}/tickers.csv"
+            
+            if self.data_manager.storage.exists(csv_path):
+                try:
+                    df = self.data_manager.load_dataframe(csv_path, format='csv')
+                    tickers = set(df['symbol'].tolist())
+                    self.logger.info(f"Found {len(tickers)} tickers from previous day")
+                    return tickers
+                except Exception as e:
+                    self.logger.warning(f"Could not read previous tickers: {e}")
+                    return set()
+            else:
+                self.logger.info("No previous ticker file found")
                 return set()
         else:
-            self.logger.info("No previous ticker file found")
-            return set()
+            # Fall back to original method
+            data_path, _ = create_partition_paths(yesterday, self.config, "tickers", test_mode)
+            csv_path = data_path / "tickers.csv"
+            
+            if csv_path.exists():
+                try:
+                    df = pd.read_csv(csv_path)
+                    tickers = set(df['symbol'].tolist())
+                    self.logger.info(f"Found {len(tickers)} tickers from previous day")
+                    return tickers
+                except Exception as e:
+                    self.logger.warning(f"Could not read previous tickers: {e}")
+                    return set()
+            else:
+                self.logger.info("No previous ticker file found")
+                return set()
     
     def calculate_ticker_changes(self, current_tickers: List[str], previous_tickers: Set[str]) -> Tuple[List[str], List[str]]:
         """
@@ -323,8 +400,16 @@ class TickerFetcher:
             cleanup_results = cleanup_old_partitions(self.config, "tickers", dry_run, test_mode)
             self.logger.info(f"Cleanup completed: {cleanup_results['total_deleted']} partitions deleted")
         
-        # Create partition paths
-        data_path, log_path = create_partition_paths(date_str, self.config, "tickers", test_mode)
+        # Update DataManager test mode
+        if self.data_manager:
+            self.data_manager.test_mode = test_mode
+        
+        # Create partition paths using DataManager if available
+        if self.data_manager:
+            data_path = Path(self.data_manager.get_partition_path(date_str, "tickers"))
+            log_path = Path(self.config.get("base_log_path", "logs/")) / self.config.get("ticker_log_path", "tickers") / f"dt={date_str}"
+        else:
+            data_path, log_path = create_partition_paths(date_str, self.config, "tickers", test_mode)
         
         # Fetch tickers with retry logic
         max_retries = self.config.get("api_retry_attempts", 3)
@@ -411,9 +496,18 @@ def main():
     parser.add_argument("--full-test", action="store_true", help="Run full test mode")
     parser.add_argument("--config", default="config/settings.yaml", help="Path to configuration file")
     
+    # Storage provider configuration
+    parser.add_argument('--storage-provider', type=str, choices=['local', 's3', 'gcs', 'azure'], 
+                       default='local', help='Storage provider to use (local, s3, gcs, azure)')
+    parser.add_argument('--storage-config', type=str, help='Path to cloud storage configuration file')
+    
     args = parser.parse_args()
     
-    fetcher = TickerFetcher(args.config)
+    fetcher = TickerFetcher(
+        config_path=args.config,
+        storage_provider=args.storage_provider,
+        storage_config_path=args.storage_config
+    )
     
     try:
         result = fetcher.run(
