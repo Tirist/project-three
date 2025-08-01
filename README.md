@@ -13,6 +13,23 @@ This project provides a complete solution for:
 
 ## 🚀 Quick Start
 
+### Option 1: Docker (Recommended)
+
+```bash
+# Clone and setup
+git clone <repository-url>
+cd project-three
+
+# Build and run with Docker
+make quickstart
+
+# Or manually:
+./scripts/docker-build.sh production latest
+./scripts/docker-run.sh pipeline test
+```
+
+### Option 2: Local Development
+
 ```bash
 # Clone and setup
 git clone <repository-url>
@@ -49,13 +66,18 @@ python check_status.py
 ├── data/             # Partitioned data storage
 ├── logs/             # Pipeline logs and metadata
 ├── config/           # Configuration files
-└── docs/             # Full documentation
+├── docs/             # Full documentation
+├── Dockerfile        # Multi-stage Docker configuration
+├── docker-compose.yml # Docker Compose services
+├── Makefile          # Development shortcuts
+└── scripts/          # Docker build and run scripts
 ```
 
 ## 📚 Documentation
 
 For detailed documentation, guides, and API references, see:
 - **[📖 Full Documentation](docs/README.md)** - Complete project guide
+- **[🐳 Docker Guide](docs/DOCKER_GUIDE.md)** - Containerization and deployment
 - **[🔧 User Guides](docs/guides/)** - Step-by-step tutorials
 - **[🔌 API Reference](docs/api/)** - API documentation
 - **[🛠️ Troubleshooting](docs/troubleshooting/)** - Common issues and solutions

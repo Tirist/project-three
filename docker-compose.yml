@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # Production pipeline service
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: stock-pipeline
+    environment:
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
+      - MAX_WORKERS=${MAX_WORKERS:-4}
+      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development service with additional tools
+  pipeline-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: stock-pipeline-dev
+    environment:
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
+      - MAX_WORKERS=${MAX_WORKERS:-4}
+      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./.env:/app/.env:ro
+      - .:/app
+    ports:
+      - "8888:8888"  # Jupyter notebook
+    restart: unless-stopped
+    profiles:
+      - dev
+
+  # Testing service
+  pipeline-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: stock-pipeline-test
+    environment:
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      - TEST_MODE=true
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./.env:/app/.env:ro
+    command: ["python", "-m", "pytest", "tests/", "-v"]
+    profiles:
+      - test
+
+  # Monitoring service (optional)
+  monitoring:
+    image: prom/prometheus:latest
+    container_name: stock-pipeline-monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    profiles:
+      - monitoring
+
+volumes:
+  prometheus_data:
+    driver: local
+
+networks:
+  default:
+    name: stock-pipeline-network 

@@ -1,0 +1,33 @@
+# Development override configuration
+# This file is automatically loaded by docker-compose for development
+version: '3.8'
+
+services:
+  pipeline-dev:
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+    command: ["python", "-m", "ipython"]
+    stdin_open: true
+    tty: true
+
+  # Add development database if needed
+  # postgres-dev:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_DB: stock_pipeline_dev
+  #     POSTGRES_USER: dev_user
+  #     POSTGRES_PASSWORD: dev_password
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_dev_data:/var/lib/postgresql/data
+  #   profiles:
+  #     - dev
+
+# volumes:
+#   postgres_dev_data: 

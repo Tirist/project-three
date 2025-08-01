@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Stock Pipeline metrics (if you add metrics endpoint)
+  - job_name: 'stock-pipeline'
+    static_configs:
+      - targets: ['pipeline:8000']  # If you add a metrics endpoint
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+  # Docker containers
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['host.docker.internal:9323']  # Docker daemon metrics
+    scrape_interval: 30s
+
+  # System metrics (if using node-exporter)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
+    scrape_interval: 30s
+
+  # Pipeline health checks
+  - job_name: 'pipeline-health'
+    static_configs:
+      - targets: ['pipeline:8000']  # Health check endpoint
+    scrape_interval: 60s
+    metrics_path: '/health' 
