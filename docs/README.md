@@ -95,7 +95,7 @@ python pipeline/run_pipeline.py --weekly-integrity
 
 The pipeline runs automatically with the following schedule:
 
-- **4:00 AM Daily**: Full production run (503 tickers) - Uses `--weekly-integrity` for production mode
+- **4:00 AM Daily**: Full production run (503 tickers) - Uses `--daily-integrity` for production mode
 - **2:00 AM Daily**: Test data cleanup (`--test-only` preserves production data)
 - **3:00 AM Sundays**: Production data cleanup (30-day retention)
 - **Every 15 minutes**: Integrity monitoring

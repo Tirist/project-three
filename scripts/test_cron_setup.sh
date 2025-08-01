@@ -24,25 +24,39 @@ else
     exit 1
 fi
 
-# Test scripts
-for script in run_integrity_smoke_tests.py run_weekly_tests.py cleanup_old_reports.py; do
-    if [ -f "$PROJECT_ROOT/scripts/$script" ]; then
-        echo "✅ $script found"
-    else
-        echo "❌ $script not found"
-        exit 1
-    fi
-done
-
-# Verify no --test flags in automated runs
-echo "Verifying cron integrity..."
-if grep -q "\\-\\-test" "$PROJECT_ROOT/scripts/run_integrity_smoke_tests.py" && ! grep -q "\\-\\-daily-integrity" "$PROJECT_ROOT/scripts/run_integrity_smoke_tests.py"; then
-    echo "❌ Daily script contains --test flag"
+# Test pipeline script
+if [ -f "$PROJECT_ROOT/pipeline/run_pipeline.py" ]; then
+    echo "✅ pipeline/run_pipeline.py found"
+else
+    echo "❌ pipeline/run_pipeline.py not found"
     exit 1
 fi
 
-if grep -q "\\-\\-test" "$PROJECT_ROOT/scripts/run_weekly_tests.py" && ! grep -q "\\-\\-weekly-integrity" "$PROJECT_ROOT/scripts/run_weekly_tests.py"; then
-    echo "❌ Weekly script contains --test flag"
+# Test integrity monitor
+if [ -f "$PROJECT_ROOT/pipeline/utils/integrity_monitor.py" ]; then
+    echo "✅ pipeline/utils/integrity_monitor.py found"
+else
+    echo "❌ pipeline/utils/integrity_monitor.py not found"
+    exit 1
+fi
+
+# Test cleanup script
+if [ -f "$PROJECT_ROOT/scripts/cleanup_old_reports.py" ]; then
+    echo "✅ scripts/cleanup_old_reports.py found"
+else
+    echo "❌ scripts/cleanup_old_reports.py not found"
+    exit 1
+fi
+
+# Verify no --test flags in automated runs
+echo "Verifying cron integrity..."
+if grep -q "\\-\\-test " "$PROJECT_ROOT/pipeline/run_pipeline.py" && ! grep -q "\\-\\-daily-integrity" "$PROJECT_ROOT/pipeline/run_pipeline.py"; then
+    echo "❌ Pipeline script contains --test flag without --daily-integrity"
+    exit 1
+fi
+
+if ! grep -q "\\-\\-weekly-integrity" "$PROJECT_ROOT/pipeline/run_pipeline.py"; then
+    echo "❌ Pipeline script missing --weekly-integrity flag"
     exit 1
 fi
 
