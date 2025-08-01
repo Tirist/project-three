@@ -17,8 +17,9 @@ PIPELINE_MODE=prod
 PYTHONUNBUFFERED=1
 
 # Project Three Data Pipeline - Daily Production Run (FULL RUN - NO --test)
-# Run daily at 4:00 AM - Fresh production data ready by 6:00 AM
-0 4 * * * cd $PROJECT_DIR && $PYTHON_PATH -m pipeline.run_pipeline --daily-integrity >> logs/cron_daily.log 2>&1
+# Run daily at 5:30 PM ET (after market close at 4:00 PM ET)
+# Fresh production data ready by 7:30 PM ET
+30 17 * * * cd $PROJECT_DIR && $PYTHON_PATH -m pipeline.run_pipeline --daily-integrity >> logs/cron_daily.log 2>&1
 
 # Project Three Data Pipeline - Cleanup Test Data Only
 # Run daily at 2:00 AM - Only clears test data, preserves production data for 30 days

@@ -165,7 +165,7 @@ class IntegrityMonitor:
             if 'grep' in line and '--test' in line:
                 continue
             # Look for actual cron command lines that might contain --test
-            if ('0 4' in line or '0 2' in line or '0 3' in line or '*/15' in line) and '--test ' in line and '--test-only' not in line:
+            if ('30 17' in line or '0 2' in line or '0 3' in line or '*/15' in line) and '--test ' in line and '--test-only' not in line:
                 test_in_commands = True
                 break
         
@@ -228,7 +228,7 @@ class IntegrityMonitor:
                     if line.strip().startswith('#') or not line.strip():
                         continue
                     # Look for actual cron command lines that contain --test
-                    if ('0 4' in line or '0 2' in line or '0 3' in line or '*/15' in line) and '--test ' in line and '--test-only' not in line:
+                    if ('30 17' in line or '0 2' in line or '0 3' in line or '*/15' in line) and '--test ' in line and '--test-only' not in line:
                         test_in_cron_commands = True
                         break
                 
