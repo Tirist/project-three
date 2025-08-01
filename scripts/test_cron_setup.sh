@@ -20,7 +20,7 @@ else
 fi
 
 # Test scripts
-for script in run_daily_tests.py run_weekly_tests.py cleanup_old_reports.py; do
+for script in run_integrity_smoke_tests.py run_weekly_tests.py cleanup_old_reports.py; do
     if [ -f "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/$script" ]; then
         echo "✅ $script found"
     else
@@ -31,12 +31,12 @@ done
 
 # Verify no --test flags in automated runs
 echo "Verifying cron integrity..."
-if grep -q "--test" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_daily_tests.py" && ! grep -q "--daily-integrity" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_daily_tests.py"; then
+if grep -q "\\-\\-test" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_integrity_smoke_tests.py" && ! grep -q "\\-\\-daily-integrity" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_integrity_smoke_tests.py"; then
     echo "❌ Daily script contains --test flag"
     exit 1
 fi
 
-if grep -q "--test" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_weekly_tests.py" && ! grep -q "--weekly-integrity" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_weekly_tests.py"; then
+if grep -q "\\-\\-test" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_weekly_tests.py" && ! grep -q "\\-\\-weekly-integrity" "/Users/jamestully/Documents/Cursor Projects/Project Three/scripts/run_weekly_tests.py"; then
     echo "❌ Weekly script contains --test flag"
     exit 1
 fi

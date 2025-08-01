@@ -24,13 +24,13 @@ echo "Python path: $PYTHON_PATH"
 echo -e "${YELLOW}Verifying cron configuration integrity...${NC}"
 
 # Check that daily script uses --daily-integrity (not --test)
-if grep -q "--test" "$PROJECT_DIR/scripts/run_daily_tests.py" && ! grep -q "--daily-integrity" "$PROJECT_DIR/scripts/run_daily_tests.py"; then
+if grep -q "\\-\\-test" "$PROJECT_DIR/scripts/run_integrity_smoke_tests.py" && ! grep -q "\\-\\-daily-integrity" "$PROJECT_DIR/scripts/run_integrity_smoke_tests.py"; then
     echo -e "${RED}ERROR: Daily script contains --test flag instead of --daily-integrity${NC}"
     exit 1
 fi
 
 # Check that weekly script uses --weekly-integrity (not --test)
-if grep -q "--test" "$PROJECT_DIR/scripts/run_weekly_tests.py" && ! grep -q "--weekly-integrity" "$PROJECT_DIR/scripts/run_weekly_tests.py"; then
+if grep -q "\\-\\-test" "$PROJECT_DIR/scripts/run_weekly_tests.py" && ! grep -q "\\-\\-weekly-integrity" "$PROJECT_DIR/scripts/run_weekly_tests.py"; then
     echo -e "${RED}ERROR: Weekly script contains --test flag instead of --weekly-integrity${NC}"
     exit 1
 fi
@@ -63,7 +63,7 @@ PYTHONUNBUFFERED=1
 
 # Project Three Data Pipeline - Daily Production Run (FULL RUN - NO --test)
 # Run daily at 4:00 AM - Fresh production data ready by 6:00 AM
-0 4 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/run_weekly_tests.py >> logs/cron_daily.log 2>&1
+0 4 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/run_integrity_smoke_tests.py >> logs/cron_daily.log 2>&1
 
 # Project Three Data Pipeline - Cleanup Test Data Only
 # Run daily at 2:00 AM - Only clears test data, preserves production data for 30 days
@@ -178,7 +178,7 @@ else
 fi
 
 # Test scripts
-for script in run_daily_tests.py run_weekly_tests.py cleanup_old_reports.py; do
+for script in run_integrity_smoke_tests.py run_weekly_tests.py cleanup_old_reports.py; do
     if [ -f "$PROJECT_DIR/scripts/\$script" ]; then
         echo "✅ \$script found"
     else
@@ -189,12 +189,12 @@ done
 
 # Verify no --test flags in automated runs
 echo "Verifying cron integrity..."
-if grep -q "--test" "$PROJECT_DIR/scripts/run_daily_tests.py" && ! grep -q "--daily-integrity" "$PROJECT_DIR/scripts/run_daily_tests.py"; then
+if grep -q "\\-\\-test" "$PROJECT_DIR/scripts/run_integrity_smoke_tests.py" && ! grep -q "\\-\\-daily-integrity" "$PROJECT_DIR/scripts/run_integrity_smoke_tests.py"; then
     echo "❌ Daily script contains --test flag"
     exit 1
 fi
 
-if grep -q "--test" "$PROJECT_DIR/scripts/run_weekly_tests.py" && ! grep -q "--weekly-integrity" "$PROJECT_DIR/scripts/run_weekly_tests.py"; then
+if grep -q "\\-\\-test" "$PROJECT_DIR/scripts/run_weekly_tests.py" && ! grep -q "\\-\\-weekly-integrity" "$PROJECT_DIR/scripts/run_weekly_tests.py"; then
     echo "❌ Weekly script contains --test flag"
     exit 1
 fi
