@@ -601,7 +601,7 @@ def load_config(config_path: str, config_type: str = "general") -> Dict[str, Any
             "base_log_path": "logs/",
             "ohlcv_data_path": "raw",
             "ohlcv_log_path": "fetch",
-            "historical_data_path": "raw/historical",
+            "historical_data_path": "data/raw/historical",
             "retention_days": 3,
             "api_retry_attempts": 3,
             "api_retry_delay": 1,

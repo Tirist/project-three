@@ -43,7 +43,7 @@ python pipeline/run_pipeline.py --test  # Test mode (5 tickers)
 python pipeline/run_pipeline.py --prod  # Production mode (503 tickers)
 
 # Check status
-python check_status.py
+python scripts/check_status.py
 ```
 
 ## 📊 Key Features
@@ -78,7 +78,12 @@ python check_status.py
 For detailed documentation, guides, and API references, see:
 - **[📖 Full Documentation](docs/README.md)** - Complete project guide
 - **[🐳 Docker Guide](docs/DOCKER_GUIDE.md)** - Containerization and deployment
-- **[🔧 User Guides](docs/guides/)** - Step-by-step tutorials
+- **[☁️ Cloud Storage](docs/CLOUD_STORAGE.md)** - Cloud storage configuration and setup
+- **[⚙️ Environment Setup](docs/ENVIRONMENT_SETUP.md)** - Development environment configuration
+- **[🔄 Refactoring Summary](docs/REFACTORING_SUMMARY.md)** - Recent code refactoring changes
+- **[✅ Data Validation](docs/VALIDATION.md)** - Data validation and quality checks
+- **[📈 Historical Data Guide](docs/guides/HISTORICAL_DATA_GUIDE.md)** - Working with historical data
+- **[🔧 User Guides](docs/guides/)** - Additional step-by-step tutorials
 - **[🔌 API Reference](docs/api/)** - API documentation
 - **[🛠️ Troubleshooting](docs/troubleshooting/)** - Common issues and solutions
 
@@ -94,7 +99,7 @@ python -m pytest tests/test_process_features.py -v
 
 ## 🔧 Maintenance
 
-- **Status Check**: `python check_status.py`
+- **Status Check**: `python scripts/check_status.py`
 - **Diagnostics**: `python scripts/run_diagnostics.py`
 - **Cleanup**: `python scripts/cleanup_old_reports.py`
 

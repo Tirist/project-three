@@ -1,32 +1,32 @@
-# Historical Data Bootstrap and Incremental Pipeline Guide
+# Historical Data and Incremental Pipeline Guide
 
-This guide explains how to use the new historical data bootstrap functionality and incremental pipeline updates to improve performance and data quality.
+This guide explains how to use the historical data functionality and incremental pipeline updates to improve performance and data quality.
 
 ## Overview
 
 The pipeline now supports:
-1. **Bootstrap Mode**: One-time bulk fetch of 2 years of historical data
+1. **Historical Data Collection**: Efficient collection of historical data using the main pipeline
 2. **Incremental Mode**: Daily updates that append only new data
 3. **Historical Integration**: Feature processing uses full historical data for accurate technical indicators
 
 ## Quick Start
 
-### 1. Bootstrap Historical Data (One-time)
+### 1. Collect Historical Data (One-time)
 
-First, bootstrap 2 years of historical data for all S&P 500 tickers:
+First, collect historical data for all S&P 500 tickers using the main pipeline:
 
 ```bash
 # Set your Alpha Vantage API key
 export ALPHA_VANTAGE_API_KEY="your_api_key_here"
 
-# Run bootstrap (this will take several hours due to rate limits)
-python bootstrap_historical_data.py --api-key $ALPHA_VANTAGE_API_KEY
+# Run historical data collection (this will take several hours due to rate limits)
+python pipeline/run_pipeline.py --historical --days 730
 ```
 
 **Expected Output:**
 - Creates `data/raw/historical/` directory
 - Organizes data by ticker and year: `ticker=AAPL/year=2024/data.parquet`
-- Generates `bootstrap_summary.json` with statistics
+- Generates historical data summary with statistics
 - Success rate should be >80% (400+ tickers)
 
 ### 2. Enable Incremental Mode
@@ -48,14 +48,14 @@ python pipeline/run_pipeline.py --weekly-integrity
 
 ## Configuration
 
-### Bootstrap Configuration
+### Historical Data Configuration
 
-The bootstrap script supports several options:
+The pipeline supports several options for historical data collection:
 
 ```bash
-python bootstrap_historical_data.py \
-    --api-key YOUR_API_KEY \
-    --output-dir data/raw/historical \
+python pipeline/run_pipeline.py \
+    --historical \
+    --days 730 \
     --batch-size 10 \
     --tickers AAPL MSFT GOOGL  # Optional: specific tickers only
     --log-level INFO
@@ -79,12 +79,12 @@ max_cooldown_seconds: 60
 
 ## Directory Structure
 
-After bootstrap, your data structure will look like:
+After historical data collection, your data structure will look like:
 
 ```
 data/
 ├── raw/
-│   ├── historical/                    # Bootstrap data
+│   ├── historical/                    # Historical data
 │   │   ├── ticker=AAPL/
 │   │   │   ├── year=2023/
 │   │   │   │   └── data.parquet
@@ -92,7 +92,7 @@ data/
 │   │   │       └── data.parquet
 │   │   ├── ticker=MSFT/
 │   │   │   └── ...
-│   │   └── bootstrap_summary.json
+│   │   └── historical_summary.json
 │   └── dt=2025-07-28/                # Daily incremental data
 │       ├── AAPL.csv
 │       ├── MSFT.csv
@@ -118,7 +118,7 @@ data/
 
 ## Technical Details
 
-### Bootstrap Process
+### Historical Data Collection Process
 
 1. **Rate Limiting**: 12-second delays between API calls (5 calls/minute)
 2. **Batch Processing**: Processes tickers in configurable batches
@@ -142,9 +142,9 @@ data/
 
 ## Monitoring and Validation
 
-### Bootstrap Validation
+### Historical Data Validation
 
-After bootstrap completes, validate the results:
+After historical data collection completes, validate the results:
 
 ```bash
 # Run historical data tests
@@ -176,21 +176,21 @@ tail -f logs/features/dt=2025-07-28/processing.log
 
 ## Troubleshooting
 
-### Bootstrap Issues
+### Historical Data Collection Issues
 
 **Rate Limit Errors:**
 ```bash
 # Increase delays between calls
-python bootstrap_historical_data.py --api-key YOUR_KEY --batch-size 5
+python pipeline/run_pipeline.py --historical --days 730 --batch-size 5
 ```
 
 **Partial Failures:**
 ```bash
-# Check bootstrap summary
-cat data/raw/historical/bootstrap_summary.json
+# Check historical data summary
+cat data/raw/historical/historical_summary.json
 
 # Retry failed tickers
-python bootstrap_historical_data.py --api-key YOUR_KEY --tickers FAILED_TICKER1 FAILED_TICKER2
+python pipeline/run_pipeline.py --historical --days 730 --tickers FAILED_TICKER1 FAILED_TICKER2
 ```
 
 ### Incremental Issues
@@ -200,8 +200,8 @@ python bootstrap_historical_data.py --api-key YOUR_KEY --tickers FAILED_TICKER1 
 # Check if historical data exists
 ls data/raw/historical/ticker=AAPL/
 
-# Re-run bootstrap if needed
-python bootstrap_historical_data.py --api-key YOUR_KEY
+# Re-run historical data collection if needed
+python pipeline/run_pipeline.py --historical --days 730
 ```
 
 **Data Gaps:**
@@ -219,7 +219,7 @@ print(fetcher.get_latest_date('AAPL'))
 If you're migrating from the old full-fetch mode:
 
 1. **Backup Current Data**: Copy your existing data
-2. **Run Bootstrap**: Execute the bootstrap process
+2. **Run Historical Data Collection**: Execute the historical data collection process
 3. **Verify Results**: Run validation tests
 4. **Update Cron Jobs**: No changes needed - pipeline auto-detects historical data
 5. **Monitor First Run**: Check that incremental mode is working
@@ -254,7 +254,7 @@ For issues or questions:
 1. Check the logs in `logs/` directory
 2. Run validation tests
 3. Review this guide
-4. Check the bootstrap summary for detailed statistics
+4. Check the historical data summary for detailed statistics
 
 ## Performance Benchmarks
 

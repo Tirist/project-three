@@ -13,7 +13,7 @@ ticker_data_path: "tickers"
 ticker_log_path: "tickers"
 
 # OHLCV data settings
-ohlcv_data_path: "raw"
+ohlcv_data_path: "data/raw"
 ohlcv_log_path: "fetch"
 retention_days: 3
 
