@@ -16,11 +16,11 @@ from datetime import datetime
 # Ensure process_features.py is called in test mode before running tests
 print("[SETUP] Ensuring mock features and metadata exist for today's partition...")
 today_str = datetime.now().strftime('dt=%Y-%m-%d')
-features_path = Path('data/processed') / today_str / 'features.parquet'
+features_path = Path('data/test/processed') / today_str / 'features.parquet'
 metadata_path = Path('logs/features') / today_str / 'metadata.json'
 if not (features_path.exists() and metadata_path.exists()):
     print(f"[SETUP] Running process_features.py --test-mode to generate mock outputs for {today_str}")
-    result = subprocess.run([sys.executable, 'process_features.py', '--test-mode'], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, 'pipeline/process_features.py', '--test-mode'], capture_output=True, text=True)
     print(result.stdout)
     if result.stderr:
         print(result.stderr)

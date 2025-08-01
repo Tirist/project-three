@@ -3,7 +3,7 @@
 
 # Cloud Storage Provider Selection
 # Set to: "s3", "gcs", "azure", or "local" (default)
-storage_provider: "local"
+storage_provider: "gcs"
 
 # AWS S3 Configuration
 aws:
@@ -36,7 +36,7 @@ aws:
 # Google Cloud Storage Configuration
 gcs:
   # GCS bucket name for data storage
-  bucket_name: "your-gcs-bucket-name"
+  bucket_name: "project_three_1"
   
   # Google Cloud credentials file path
   # Can also be set via GOOGLE_APPLICATION_CREDENTIALS environment variable

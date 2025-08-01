@@ -30,6 +30,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install additional tools needed for production
+RUN pip install --no-cache-dir ipython
+
 # Stage 3: Production image
 FROM base as production
 
@@ -54,8 +57,11 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import sys; sys.exit(0)" || exit 1
 
+# Expose port for web server
+EXPOSE 8080
+
 # Default command
-CMD ["python", "pipeline/run_pipeline.py", "--help"]
+CMD ["python", "app.py"]
 
 # Stage 4: Development image
 FROM base as development

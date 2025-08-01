@@ -556,7 +556,12 @@ def create_storage_backend(storage_type: str = "local", **kwargs) -> StorageBack
     elif storage_type == "s3":
         return S3StorageBackend(**kwargs)
     elif storage_type == "gcs":
-        return GCSStorageBackend(**kwargs)
+        # GCS requires bucket_name as first positional argument
+        bucket_name = kwargs.get('bucket_name')
+        if not bucket_name:
+            raise ValueError("bucket_name is required for GCS storage backend")
+        project_id = kwargs.get('project_id')
+        return GCSStorageBackend(bucket_name, project_id)
     else:
         raise ValueError(f"Unsupported storage type: {storage_type}")
 
