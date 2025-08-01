@@ -165,7 +165,7 @@ class IntegrityMonitor:
             if 'grep' in line and '--test' in line:
                 continue
             # Look for actual cron command lines that might contain --test
-            if ('0 6' in line or '0 8' in line or '0 2' in line or '*/15' in line) and '--test' in line:
+            if ('0 4' in line or '0 2' in line or '0 3' in line or '*/15' in line) and '--test ' in line and '--test-only' not in line:
                 test_in_commands = True
                 break
         
@@ -174,9 +174,9 @@ class IntegrityMonitor:
             return False
         
         # Check daily test script
-        daily_script = Path("scripts/run_daily_tests.py")
+        daily_script = Path("pipeline/run_pipeline.py")
         if not daily_script.exists():
-            print("❌ run_daily_tests.py not found")
+            print("❌ pipeline/run_pipeline.py not found")
             return False
         
         with open(daily_script, 'r') as f:
@@ -201,31 +201,18 @@ class IntegrityMonitor:
             print("❌ Daily script uses --test instead of --daily-integrity")
             return False
         
-        # Check weekly test script
-        weekly_script = Path("scripts/run_weekly_tests.py")
-        if not weekly_script.exists():
-            print("❌ run_weekly_tests.py not found")
-            return False
-        
-        with open(weekly_script, 'r') as f:
-            weekly_content = f.read()
-        
-        # Look for actual command-line usage of --test (not in comments)
-        weekly_lines = weekly_content.split('\n')
-        test_usage_found = False
+        # Check weekly test script (same file, different flag)
         weekly_integrity_found = False
         
-        for line in weekly_lines:
+        for line in daily_lines:
             # Skip comments and empty lines
             if line.strip().startswith('#') or not line.strip():
                 continue
-            if '--test' in line and not line.strip().startswith('#'):
-                test_usage_found = True
             if '--weekly-integrity' in line and not line.strip().startswith('#'):
                 weekly_integrity_found = True
         
-        if test_usage_found and not weekly_integrity_found:
-            print("❌ Weekly script uses --test instead of --weekly-integrity")
+        if not weekly_integrity_found:
+            print("❌ Weekly integrity flag not found in pipeline script")
             return False
         
         # Check actual cron jobs
@@ -241,7 +228,7 @@ class IntegrityMonitor:
                     if line.strip().startswith('#') or not line.strip():
                         continue
                     # Look for actual cron command lines that contain --test
-                    if ('0 6' in line or '0 8' in line or '0 2' in line or '*/15' in line) and '--test' in line:
+                    if ('0 4' in line or '0 2' in line or '0 3' in line or '*/15' in line) and '--test ' in line and '--test-only' not in line:
                         test_in_cron_commands = True
                         break
                 
@@ -536,9 +523,9 @@ class IntegrityMonitor:
                 # Execute retry
                 try:
                     if mode == 'daily':
-                        cmd = [sys.executable, "scripts/run_daily_tests.py"]
+                        cmd = [sys.executable, "-m", "pipeline.run_pipeline", "--daily-integrity"]
                     else:  # weekly
-                        cmd = [sys.executable, "scripts/run_weekly_tests.py"]
+                        cmd = [sys.executable, "-m", "pipeline.run_pipeline", "--weekly-integrity"]
                     
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
                     

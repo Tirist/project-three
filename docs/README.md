@@ -26,8 +26,6 @@ project_root/
 │   ├── test_process_features.py
 │   └── run_all_tests.py
 ├── scripts/                    # Automation scripts
-│   ├── run_daily_tests.py      # Daily smoke tests
-│   ├── run_weekly_tests.py     # Weekly full tests
 │   ├── cleanup_old_reports.py  # Data retention management
 │   └── setup_cron.sh          # Cron job setup
 ├── tools/                      # Maintenance and utilities
