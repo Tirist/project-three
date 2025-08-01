@@ -345,6 +345,11 @@ class TickerFetcher:
         # Clean ticker symbols
         cleaned_tickers = self.clean_ticker_symbols(tickers)
         
+        # Filter company names to match cleaned tickers
+        # Create a mapping from original tickers to company names
+        ticker_to_company = dict(zip(tickers, company_names))
+        cleaned_company_names = [ticker_to_company[ticker] for ticker in cleaned_tickers]
+        
         # Validate ticker count
         if not self.validate_ticker_count(len(cleaned_tickers)):
             self.logger.warning("Ticker count validation failed, but continuing")
@@ -354,7 +359,7 @@ class TickerFetcher:
         added_tickers, removed_tickers = self.calculate_ticker_changes(cleaned_tickers, previous_tickers)
         
         # Save tickers to CSV
-        csv_path = self.save_tickers_csv(cleaned_tickers, company_names, data_path, dry_run)
+        csv_path = self.save_tickers_csv(cleaned_tickers, cleaned_company_names, data_path, dry_run)
         
         # Save diff log
         diff_path = self.save_diff_log(added_tickers, removed_tickers, log_path, dry_run)

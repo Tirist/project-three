@@ -281,7 +281,7 @@ def main():
         monitor.log_checkpoint(run_id, "cleanup", 0, 1, time.time() - start_time)
 
     # 1. fetch_tickers.py - Always fetch full ticker list by default
-    ticker_cmd = [sys.executable, 'pipeline/fetch_tickers.py', '--force', '--progress']
+    ticker_cmd = [sys.executable, 'pipeline/fetch_tickers.py', '--force']
     if args.prod:
         # Production mode: full ticker pull, no test flags
         if '--force' not in ticker_cmd:
@@ -313,16 +313,16 @@ def main():
     data_cmd = [sys.executable, 'pipeline/fetch_data.py', '--progress']
     if args.prod:
         # Production mode: full data fetch
-        data_cmd.extend(['--cooldown', '1'])
+        pass  # No additional flags needed
     elif args.full_test:
         # Full test mode: comprehensive data fetch
-        data_cmd.extend(['--full-test', '--cooldown', '1'])
+        data_cmd.append('--full-test')
     elif test_mode:
         # Test mode: limited data fetch
-        data_cmd.extend(['--test', '--cooldown', '1'])
+        data_cmd.append('--test')
     else:
         # Default: full data fetch
-        data_cmd.extend(['--cooldown', '1'])
+        pass  # No additional flags needed
     
     data_ok, d_time = True, 0
     if not (args.prod and args.skip_fetch):
@@ -346,7 +346,7 @@ def main():
         features_cmd.append('--drop-incomplete')
     elif args.full_test:
         # Full test mode: comprehensive feature processing
-        features_cmd.extend(['--full-test', '--drop-incomplete'])
+        features_cmd.append('--drop-incomplete')
     elif test_mode:
         # Test mode: limited feature processing
         features_cmd.append('--test-mode')

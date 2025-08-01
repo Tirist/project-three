@@ -348,7 +348,12 @@ class OHLCVFetcher:
             return self.fetch_ohlcv_data(ticker, days_back)
         
         # Check if we need to fetch new data
-        days_since_update = (datetime.now() - latest_date).days
+        # Ensure both datetime objects are timezone-naive for comparison
+        now = datetime.now()
+        if latest_date.tzinfo is not None:
+            latest_date = latest_date.replace(tzinfo=None)
+        
+        days_since_update = (now - latest_date).days
         
         if days_since_update <= 1:
             self.logger.debug(f"{ticker} data is up to date (last update: {latest_date})")
@@ -360,6 +365,11 @@ class OHLCVFetcher:
         
         if new_data is not None:
             # Filter to only new data
+            # Ensure both DataFrame dates and latest_date are timezone-naive for comparison
+            if new_data['date'].dt.tz is not None:
+                new_data = new_data.copy()
+                new_data['date'] = new_data['date'].dt.tz_localize(None)
+            
             new_data = new_data[new_data['date'] > latest_date]
             
             if not new_data.empty:
@@ -387,6 +397,15 @@ class OHLCVFetcher:
         if historical_df is None or historical_df.empty:
             self.logger.info(f"No historical data for {ticker}, using new data only")
             return new_data
+        
+        # Ensure both DataFrames have timezone-naive dates for comparison
+        if new_data['date'].dt.tz is not None:
+            new_data = new_data.copy()
+            new_data['date'] = new_data['date'].dt.tz_localize(None)
+        
+        if historical_df['date'].dt.tz is not None:
+            historical_df = historical_df.copy()
+            historical_df['date'] = historical_df['date'].dt.tz_localize(None)
         
         # Combine data, keeping the most recent version of any duplicate dates
         combined_df = pd.concat([historical_df, new_data], ignore_index=True)
