@@ -183,6 +183,37 @@ notifications:
   webhook_url: "https://hooks.slack.com/..."
 ```
 
+### Cloud Storage (`config/cloud_settings.yaml`)
+```yaml
+# Cloud storage provider selection
+storage_provider: "local"  # Options: "s3", "gcs", "azure", "local"
+
+# AWS S3 configuration
+aws:
+  bucket_name: "your-s3-bucket-name"
+  region: "us-east-1"
+  path_prefix: "stock-data/"
+  storage_class: "STANDARD"
+  encryption: true
+
+# Google Cloud Storage configuration
+gcs:
+  bucket_name: "your-gcs-bucket-name"
+  credentials_file: "/path/to/service-account-key.json"
+  path_prefix: "stock-data/"
+  storage_class: "STANDARD"
+
+# Azure Blob Storage configuration
+azure:
+  account_name: "your-storage-account"
+  container_name: "stock-data"
+  connection_string: "your-connection-string"
+  path_prefix: "stock-data/"
+  blob_tier: "Hot"
+```
+
+For detailed cloud storage configuration, see [Cloud Storage Documentation](CLOUD_STORAGE.md).
+
 ## 📈 Monitoring & Reporting
 
 ### Integrity Reports

@@ -12,6 +12,57 @@ The new architecture uses a pluggable storage backend system with the following 
 - **GCSStorageBackend**: Implementation for Google Cloud Storage
 - **DataManager**: High-level interface that works with any storage backend
 
+## Configuration
+
+### Cloud Settings File
+
+The pipeline uses `config/cloud_settings.yaml` for cloud storage configuration. This file contains comprehensive settings for all supported cloud providers:
+
+```yaml
+# Cloud Storage Provider Selection
+storage_provider: "local"  # Options: "s3", "gcs", "azure", "local"
+
+# AWS S3 Configuration
+aws:
+  bucket_name: "your-s3-bucket-name"
+  region: "us-east-1"
+  path_prefix: "stock-data/"
+  storage_class: "STANDARD"
+  encryption: true
+
+# Google Cloud Storage Configuration
+gcs:
+  bucket_name: "your-gcs-bucket-name"
+  credentials_file: "/path/to/service-account-key.json"
+  path_prefix: "stock-data/"
+  storage_class: "STANDARD"
+
+# Azure Blob Storage Configuration
+azure:
+  account_name: "your-storage-account"
+  container_name: "stock-data"
+  connection_string: "your-connection-string"
+  path_prefix: "stock-data/"
+  blob_tier: "Hot"
+```
+
+### Environment Variables
+
+You can also configure cloud storage using environment variables (which take precedence over the config file):
+
+```bash
+# AWS S3
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_DEFAULT_REGION="us-east-1"
+
+# Google Cloud Storage
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-key.json"
+
+# Azure Blob Storage
+export AZURE_STORAGE_CONNECTION_STRING="your-connection-string"
+```
+
 ## Supported Storage Backends
 
 ### 1. Local Filesystem (Default)

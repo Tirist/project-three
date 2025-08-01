@@ -1,0 +1,195 @@
+# Cloud Storage Configuration for Stock Evaluation Pipeline
+# This file contains settings for cloud storage backends (AWS S3, Google Cloud Storage, Azure Blob Storage)
+
+# Cloud Storage Provider Selection
+# Set to: "s3", "gcs", "azure", or "local" (default)
+storage_provider: "local"
+
+# AWS S3 Configuration
+aws:
+  # S3 bucket name for data storage
+  bucket_name: "your-s3-bucket-name"
+  
+  # AWS credentials (can also be set via environment variables)
+  # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+  access_key_id: null  # Set via environment variable or here
+  secret_access_key: null  # Set via environment variable or here
+  
+  # AWS region
+  region: "us-east-1"
+  
+  # S3 path prefix for organizing data
+  path_prefix: "stock-data/"
+  
+  # S3 storage class (STANDARD, STANDARD_IA, GLACIER, etc.)
+  storage_class: "STANDARD"
+  
+  # Enable server-side encryption
+  encryption: true
+  
+  # S3 transfer configuration
+  transfer:
+    multipart_threshold: 8388608  # 8MB
+    max_concurrency: 10
+    use_threads: true
+
+# Google Cloud Storage Configuration
+gcs:
+  # GCS bucket name for data storage
+  bucket_name: "your-gcs-bucket-name"
+  
+  # Google Cloud credentials file path
+  # Can also be set via GOOGLE_APPLICATION_CREDENTIALS environment variable
+  credentials_file: null
+  
+  # GCS path prefix for organizing data
+  path_prefix: "stock-data/"
+  
+  # GCS storage class (STANDARD, NEARLINE, COLDLINE, ARCHIVE)
+  storage_class: "STANDARD"
+  
+  # Enable customer-managed encryption keys
+  encryption:
+    enabled: false
+    key_name: null
+  
+  # GCS transfer configuration
+  transfer:
+    chunk_size: 8388608  # 8MB
+    max_concurrency: 10
+
+# Azure Blob Storage Configuration
+azure:
+  # Azure storage account name
+  account_name: "your-storage-account"
+  
+  # Azure container name
+  container_name: "stock-data"
+  
+  # Azure connection string (can also be set via AZURE_STORAGE_CONNECTION_STRING)
+  connection_string: null
+  
+  # Azure path prefix for organizing data
+  path_prefix: "stock-data/"
+  
+  # Azure blob tier (Hot, Cool, Archive)
+  blob_tier: "Hot"
+  
+  # Enable customer-managed encryption keys
+  encryption:
+    enabled: false
+    key_name: null
+  
+  # Azure transfer configuration
+  transfer:
+    max_concurrency: 10
+    max_retries: 3
+
+# Data Organization Settings
+data_organization:
+  # Partition structure for cloud storage
+  # Options: "date", "ticker", "date_ticker", "custom"
+  partition_strategy: "date_ticker"
+  
+  # Custom partition format (if using custom strategy)
+  # Example: "{year}/{month}/{ticker}"
+  custom_partition_format: null
+  
+  # Enable data versioning
+  versioning: true
+  
+  # Data retention settings for cloud storage
+  retention:
+    # Retention period in days
+    days: 365
+    
+    # Enable automatic cleanup
+    auto_cleanup: true
+    
+    # Cleanup schedule (cron format)
+    cleanup_schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+
+# Performance and Reliability Settings
+performance:
+  # Connection timeout in seconds
+  connection_timeout: 30
+  
+  # Read timeout in seconds
+  read_timeout: 60
+  
+  # Write timeout in seconds
+  write_timeout: 60
+  
+  # Retry configuration
+  retry:
+    max_attempts: 3
+    backoff_factor: 2
+    max_backoff: 60
+  
+  # Caching settings
+  cache:
+    enabled: true
+    max_size: 1000  # MB
+    ttl: 3600  # seconds
+
+# Monitoring and Logging
+monitoring:
+  # Enable cloud storage metrics
+  metrics_enabled: true
+  
+  # Log cloud storage operations
+  logging_enabled: true
+  
+  # Cloud storage operation logging level
+  log_level: "INFO"
+  
+  # Enable cost tracking
+  cost_tracking: true
+
+# Security Settings
+security:
+  # Enable access logging
+  access_logging: true
+  
+  # Enable audit logging
+  audit_logging: true
+  
+  # Data encryption at rest
+  encryption_at_rest: true
+  
+  # Data encryption in transit
+  encryption_in_transit: true
+  
+  # Enable bucket/container versioning
+  versioning: true
+  
+  # Enable MFA delete (S3 only)
+  mfa_delete: false
+
+# Backup and Disaster Recovery
+backup:
+  # Enable cross-region replication
+  cross_region_replication: false
+  
+  # Backup schedule (cron format)
+  backup_schedule: "0 1 * * *"  # Daily at 1 AM
+  
+  # Backup retention period in days
+  backup_retention_days: 30
+  
+  # Enable point-in-time recovery
+  point_in_time_recovery: false
+
+# Migration Settings
+migration:
+  # Enable data migration from local to cloud
+  local_to_cloud: false
+  
+  # Migration batch size
+  batch_size: 1000
+  
+  # Migration concurrency
+  max_concurrency: 5
+  
+  # Enable migration validation
+  validation: true 
