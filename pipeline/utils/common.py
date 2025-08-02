@@ -15,7 +15,7 @@ import shutil
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, BinaryIO
+from typing import Any, Dict, List, Optional, Tuple, Union
 import io
 
 import pandas as pd
@@ -38,24 +38,22 @@ logging.basicConfig(
 # Storage backend imports (optional dependencies)
 try:
     import boto3
-    from botocore.exceptions import ClientError, NoCredentialsError
+    from botocore.exceptions import ClientError
     S3_AVAILABLE = True
 except ImportError:
     S3_AVAILABLE = False
 
 try:
     from google.cloud import storage
-    from google.cloud.exceptions import NotFound
     GCS_AVAILABLE = True
 except ImportError:
     GCS_AVAILABLE = False
 
 try:
-    from azure.storage.blob import BlobServiceClient
-    from azure.core.exceptions import ResourceNotFoundError
     AZURE_AVAILABLE = True
 except ImportError:
     AZURE_AVAILABLE = False
+
 
 class StorageBackend(ABC):
     """Abstract base class for storage backends."""

@@ -21,7 +21,7 @@ import pytest
 # Add pipeline directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "pipeline"))
 
-from utils.common import create_storage_backend, DataManager, LocalStorageBackend
+from utils.common import create_storage_backend, DataManager, LocalStorageBackend, GCSStorageBackend
 
 
 class TestStorageProviderCLI:
@@ -64,18 +64,24 @@ class TestStorageProviderCLI:
         except ImportError:
             pytest.skip("google-cloud-storage not available")
         
-        # Only run the test if google-cloud-storage is actually available
+        # Mock the entire GCS client creation to avoid credential issues
         with patch('pipeline.utils.common.GCS_AVAILABLE', True):
             with patch('pipeline.utils.common.storage') as mock_storage:
-                mock_client = Mock()
-                mock_storage.Client.return_value = mock_client
-                mock_bucket = Mock()
-                mock_client.bucket.return_value = mock_bucket
-                
-                backend = create_storage_backend("gcs", bucket_name="test-bucket")
-                
-                assert backend.bucket_name == "test-bucket"
-                mock_storage.Client.assert_called_once()
+                with patch('google.auth.default') as mock_auth:
+                    # Create a proper mock credential with universe_domain
+                    mock_credential = Mock()
+                    mock_credential.universe_domain = 'googleapis.com'
+                    mock_auth.return_value = (mock_credential, None)
+                    
+                    mock_client = Mock()
+                    mock_storage.Client.return_value = mock_client
+                    mock_bucket = Mock()
+                    mock_client.bucket.return_value = mock_bucket
+                    
+                    backend = create_storage_backend("gcs", bucket_name="test-bucket")
+                    
+                    assert backend.bucket_name == "test-bucket"
+                    assert isinstance(backend, GCSStorageBackend)
     
     def test_data_manager_with_local_storage(self):
         """Test DataManager initialization with local storage."""

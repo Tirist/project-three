@@ -360,8 +360,8 @@ class TestCloudBackendAvailability:
         """Test GCS availability check."""
         # Test when GCS is not available - should raise ImportError
         with patch('pipeline.utils.common.GCS_AVAILABLE', False):
-            with pytest.raises(TypeError, match="missing 1 required positional argument"):
-                # This will fail because GCSStorageBackend requires bucket_name
+            with pytest.raises(ValueError, match="bucket_name is required for GCS storage backend"):
+                # This will fail because bucket_name is required
                 create_storage_backend("gcs")
 
 
