@@ -112,4 +112,7 @@ dmypy.json
 fetch_data.log
 fetch_tickers.log
 process_features.log
-*.log 
+*.log
+
+# Google Cloud Service Account
+config/service-account-key.json 

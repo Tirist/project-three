@@ -40,6 +40,8 @@ gcs:
   
   # Google Cloud credentials file path
   # Can also be set via GOOGLE_APPLICATION_CREDENTIALS environment variable
+  # If set here, the system will automatically set GOOGLE_APPLICATION_CREDENTIALS
+  # Example: "./service-account-key.json" or "/path/to/service-account-key.json"
   credentials_file: null
   
   # GCS path prefix for organizing data

@@ -137,7 +137,43 @@ AWS_DEFAULT_REGION=us-east-1
 # Optional - Performance
 MAX_WORKERS=4
 CHUNK_SIZE=1000
+
+# Optional - Google Cloud Storage
+GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json
 ```
+
+### Service Account Configuration
+
+For Google Cloud Storage integration, you need to configure a service account:
+
+1. **Create Service Account Key**:
+   ```bash
+   # Download your service account key from Google Cloud Console
+   # or create one using gcloud CLI
+   gcloud iam service-accounts keys create service-account-key.json \
+     --iam-account=your-service-account@your-project.iam.gserviceaccount.com
+   ```
+
+2. **Place the Key File**:
+   ```bash
+   # Place the service account key in the project root
+   cp service-account-key.json ./service-account-key.json
+   ```
+
+3. **Volume Mapping**:
+   The Docker configuration automatically mounts the service account key:
+   ```yaml
+   volumes:
+     - ./service-account-key.json:/app/config/service-account-key.json:ro
+   ```
+
+4. **Environment Variable**:
+   The `GOOGLE_APPLICATION_CREDENTIALS` environment variable is set to:
+   ```
+   GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json
+   ```
+
+**Security Note**: The service account key is mounted as read-only (`:ro`) and should be kept secure. Never commit the key file to version control.
 
 ## Development Workflow
 

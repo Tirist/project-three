@@ -15,7 +15,7 @@ ticker_log_path: "tickers"
 # OHLCV data settings
 ohlcv_data_path: "data/raw"
 ohlcv_log_path: "fetch"
-retention_days: 3
+ohlcv_retention_days: 3  # Shorter retention for frequently updated OHLCV data
 
 # API settings
 api_retry_attempts: 3
@@ -27,7 +27,7 @@ min_tickers_expected: 500
 max_tickers_expected: 510
 
 # Retention and cleanup settings
-retention_days: 30
+retention_days: 30  # General retention period for ticker and processed data
 cleanup_enabled: true
 cleanup_log_path: "cleanup"
 

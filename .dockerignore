@@ -51,6 +51,10 @@ reports/
 .env.local
 .env.*.local
 
+# Service account credentials (mounted as volume)
+service-account-key.json
+config/service-account-key.json
+
 # Docker files
 Dockerfile*
 docker-compose*.yml

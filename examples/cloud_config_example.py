@@ -80,12 +80,13 @@ def create_storage_backend_from_config(config):
     elif storage_provider == 'gcs':
         gcs_config = config.get('gcs', {})
         
-        # Check for environment variable first
-        credentials_file = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or gcs_config.get('credentials_file')
+        # The configuration loading system will automatically handle credentials
+        # Check if GOOGLE_APPLICATION_CREDENTIALS is set (either via env var or config)
+        credentials_file = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
         
         if not credentials_file:
             print("❌ Google Cloud credentials not found")
-            print("Please set GOOGLE_APPLICATION_CREDENTIALS environment variable or configure credentials_file in config")
+            print("Please set GOOGLE_APPLICATION_CREDENTIALS environment variable or configure credentials_file in config/cloud_settings.yaml")
             return None
         
         bucket_name = gcs_config.get('bucket_name')

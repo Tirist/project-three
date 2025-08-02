@@ -60,6 +60,66 @@ gcloud iam service-accounts keys create service-account-key.json \
 mv service-account-key.json ~/.config/gcloud/
 ```
 
+## Docker Configuration
+
+### 1. Service Account Key Setup
+The project supports multiple ways to configure Google Cloud credentials:
+
+**Option A: Environment Variable (Recommended for Docker)**
+```bash
+# Set the environment variable to point to the mounted service account key
+export GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json
+```
+
+**Option B: Configuration File**
+```yaml
+# In config/cloud_settings.yaml
+gcs:
+  credentials_file: "./service-account-key.json"
+```
+
+The system automatically handles credential configuration with the following priority:
+1. `GOOGLE_APPLICATION_CREDENTIALS` environment variable (highest priority)
+2. `credentials_file` in `config/cloud_settings.yaml`
+3. Default Google Cloud SDK authentication
+
+### 2. Docker Compose Configuration
+The Docker Compose configuration automatically:
+- Mounts the service account key file: `./service-account-key.json:/app/config/service-account-key.json:ro`
+- Sets the environment variable: `GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json`
+
+### 3. Running with Docker
+```bash
+# Start the pipeline with Google Cloud Storage
+docker-compose up pipeline
+
+# For development
+docker-compose --profile dev up pipeline-dev
+
+# For testing
+docker-compose --profile test up pipeline-test
+```
+
+### 4. Using Cloud Storage in Docker
+```bash
+# Run the pipeline with GCS storage
+docker-compose run --rm pipeline python pipeline/process_features.py \
+    --storage-provider gcs \
+    --storage-config config/cloud_settings.yaml \
+    --test-mode
+```
+
+### 5. Enhanced Configuration Loading
+The system now automatically handles Google Cloud credentials with intelligent fallback:
+
+1. **Environment Variable Priority**: If `GOOGLE_APPLICATION_CREDENTIALS` is set, it takes precedence
+2. **Configuration File Fallback**: If not set via environment, the system checks `config/cloud_settings.yaml`
+3. **Automatic Environment Setting**: If credentials are found in config, the system automatically sets the environment variable
+4. **Google Cloud SDK**: Falls back to default Google Cloud SDK authentication if neither is configured
+
+This provides flexibility for different deployment scenarios while maintaining security best practices.
+```
+
 ## Environment Configuration
 
 ### 1. Local Development (.env file)
@@ -67,13 +127,17 @@ mv service-account-key.json ~/.config/gcloud/
 # Alpha Vantage API Configuration
 ALPHA_VANTAGE_API_KEY=your_api_key_here
 
-# Google Cloud Storage Configuration
+# Google Cloud Storage Configuration (Optional - can also use config file)
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
 
 # Performance Configuration
 MAX_WORKERS=4
 CHUNK_SIZE=500
 ```
+
+**Note**: For Google Cloud credentials, you can either:
+- Set `GOOGLE_APPLICATION_CREDENTIALS` in your `.env` file, or
+- Configure `credentials_file` in `config/cloud_settings.yaml`
 
 ### 2. Cloud Run Environment Variables
 ```bash
@@ -84,6 +148,17 @@ gcloud run services update stock-pipeline \
     ALPHA_VANTAGE_API_KEY=your_api_key_here,\
     STORAGE_PROVIDER=gcs,\
     GOOGLE_CLOUD_PROJECT=your-project-id
+
+# For Google Cloud credentials, you have two options:
+
+# Option A: Use environment variable (if you have the key file)
+gcloud run services update stock-pipeline \
+    --region us-central1 \
+    --set-env-vars \
+    GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json
+
+# Option B: Use service account attached to Cloud Run (recommended)
+# The service account will be automatically used for authentication
 ```
 
 ## Persistent Storage in Cloud Run
@@ -241,7 +316,13 @@ gsutil ls -l gs://your-bucket-name/data/ | tail -20
 - Never commit keys to version control
 - Use Workload Identity when possible
 
-### 2. Environment Variables
+### 2. Credential Management
+- **Local Development**: Use environment variables or configuration files
+- **Docker Deployments**: Mount service account keys as read-only volumes
+- **Cloud Run**: Use service account attached to Cloud Run (recommended)
+- **Configuration Priority**: Environment variables > config files > default auth
+
+### 3. Environment Variables
 - Store sensitive data in Secret Manager
 - Use environment variables for configuration
 - Validate all inputs

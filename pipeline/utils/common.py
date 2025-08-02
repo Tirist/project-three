@@ -387,7 +387,11 @@ class GCSStorageBackend(StorageBackend):
     def delete_file(self, path: str) -> None:
         normalized_path = self._normalize_path(path)
         blob = self.bucket.blob(normalized_path)
-        blob.delete(ignore_errors=True)
+        try:
+            blob.delete()
+        except Exception:
+            # Swallow NotFound or generic exceptions
+            pass
     
     def delete_directory(self, path: str) -> None:
         normalized_path = self._normalize_path(path)
@@ -396,7 +400,11 @@ class GCSStorageBackend(StorageBackend):
         
         blobs = self.storage_client.list_blobs(self.bucket_name, prefix=normalized_path)
         for blob in blobs:
-            blob.delete(ignore_errors=True)
+            try:
+                blob.delete()
+            except Exception:
+                # Swallow NotFound or generic exceptions
+                pass
     
     def get_file_size(self, path: str) -> int:
         normalized_path = self._normalize_path(path)
@@ -605,7 +613,7 @@ def load_config(config_path: str, config_type: str = "general") -> Dict[str, Any
             "ohlcv_data_path": "raw",
             "ohlcv_log_path": "fetch",
             "historical_data_path": "data/raw/historical",
-            "retention_days": 3,
+            "ohlcv_retention_days": 3,
             "api_retry_attempts": 3,
             "api_retry_delay": 1,
             "alpha_vantage_api_key": "",
@@ -685,8 +693,15 @@ def _override_with_env_vars(config: Dict[str, Any]) -> Dict[str, Any]:
     if os.environ.get('AWS_DEFAULT_REGION'):
         config['aws_default_region'] = os.environ['AWS_DEFAULT_REGION']
     
+    # Google Cloud Storage Configuration
     if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
         config['google_application_credentials'] = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+    elif config.get('gcs', {}).get('credentials_file'):
+        # Set GOOGLE_APPLICATION_CREDENTIALS from config if not already set
+        credentials_file = config['gcs']['credentials_file']
+        if credentials_file and os.path.exists(credentials_file):
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_file
+            config['google_application_credentials'] = credentials_file
     
     if os.environ.get('AZURE_STORAGE_CONNECTION_STRING'):
         config['azure_storage_connection_string'] = os.environ['AZURE_STORAGE_CONNECTION_STRING']
@@ -934,7 +949,12 @@ def cleanup_old_partitions(config: Dict[str, Any], data_type: str, dry_run: bool
     Returns:
         Dictionary containing cleanup results
     """
-    retention_days = config.get("retention_days", 30)
+    # Use data-type specific retention days if available
+    if data_type == "raw":
+        retention_days = config.get("ohlcv_retention_days", config.get("retention_days", 30))
+    else:
+        retention_days = config.get("retention_days", 30)
+    
     cutoff_date = datetime.now() - timedelta(days=retention_days)
     
     if test_mode:

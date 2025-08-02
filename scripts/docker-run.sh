@@ -61,9 +61,11 @@ run_pipeline() {
             docker run --rm \
                 --name $CONTAINER_NAME \
                 -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+                -e GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json \
                 -v "$(pwd)/data:/app/data" \
                 -v "$(pwd)/logs:/app/logs" \
                 -v "$(pwd)/reports:/app/reports" \
+                -v "$(pwd)/service-account-key.json:/app/config/service-account-key.json:ro" \
                 ${IMAGE_NAME}:${TAG} \
                 python pipeline/run_pipeline.py --test
             ;;
@@ -71,9 +73,11 @@ run_pipeline() {
             docker run --rm \
                 --name $CONTAINER_NAME \
                 -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+                -e GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json \
                 -v "$(pwd)/data:/app/data" \
                 -v "$(pwd)/logs:/app/logs" \
                 -v "$(pwd)/reports:/app/reports" \
+                -v "$(pwd)/service-account-key.json:/app/config/service-account-key.json:ro" \
                 ${IMAGE_NAME}:${TAG} \
                 python pipeline/run_pipeline.py --full
             ;;
@@ -81,9 +85,11 @@ run_pipeline() {
             docker run --rm \
                 --name $CONTAINER_NAME \
                 -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+                -e GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json \
                 -v "$(pwd)/data:/app/data" \
                 -v "$(pwd)/logs:/app/logs" \
                 -v "$(pwd)/reports:/app/reports" \
+                -v "$(pwd)/service-account-key.json:/app/config/service-account-key.json:ro" \
                 ${IMAGE_NAME}:${TAG} \
                 python pipeline/run_pipeline.py --daily-integrity
             ;;
@@ -91,9 +97,11 @@ run_pipeline() {
             docker run --rm \
                 --name $CONTAINER_NAME \
                 -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+                -e GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json \
                 -v "$(pwd)/data:/app/data" \
                 -v "$(pwd)/logs:/app/logs" \
                 -v "$(pwd)/reports:/app/reports" \
+                -v "$(pwd)/service-account-key.json:/app/config/service-account-key.json:ro" \
                 ${IMAGE_NAME}:${TAG} \
                 python pipeline/run_pipeline.py --weekly-integrity
             ;;
@@ -101,9 +109,11 @@ run_pipeline() {
             docker run -it --rm \
                 --name $CONTAINER_NAME \
                 -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+                -e GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json \
                 -v "$(pwd)/data:/app/data" \
                 -v "$(pwd)/logs:/app/logs" \
                 -v "$(pwd)/reports:/app/reports" \
+                -v "$(pwd)/service-account-key.json:/app/config/service-account-key.json:ro" \
                 ${IMAGE_NAME}:${TAG} \
                 /bin/bash
             ;;
@@ -111,9 +121,11 @@ run_pipeline() {
             docker run -it --rm \
                 --name $CONTAINER_NAME \
                 -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+                -e GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json \
                 -v "$(pwd)/data:/app/data" \
                 -v "$(pwd)/logs:/app/logs" \
                 -v "$(pwd)/reports:/app/reports" \
+                -v "$(pwd)/service-account-key.json:/app/config/service-account-key.json:ro" \
                 ${IMAGE_NAME}:${TAG} \
                 python
             ;;
@@ -121,10 +133,12 @@ run_pipeline() {
             docker run --rm \
                 --name $CONTAINER_NAME \
                 -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+                -e GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json \
                 -e TEST_MODE=true \
                 -v "$(pwd)/data:/app/data" \
                 -v "$(pwd)/logs:/app/logs" \
                 -v "$(pwd)/reports:/app/reports" \
+                -v "$(pwd)/service-account-key.json:/app/config/service-account-key.json:ro" \
                 ${IMAGE_NAME}:${TAG} \
                 python -m pytest tests/ -v
             ;;
@@ -149,6 +163,7 @@ run_dev() {
     docker run -it --rm \
         --name "${CONTAINER_NAME}-dev" \
         -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+        -e GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json \
         -e DEBUG=true \
         -e LOG_LEVEL=DEBUG \
         -p 8888:8888 \
@@ -156,6 +171,7 @@ run_dev() {
         -v "$(pwd)/data:/app/data" \
         -v "$(pwd)/logs:/app/logs" \
         -v "$(pwd)/reports:/app/reports" \
+        -v "$(pwd)/service-account-key.json:/app/config/service-account-key.json:ro" \
         ${IMAGE_NAME}:development \
         python -m ipython
 }

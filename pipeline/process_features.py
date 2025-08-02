@@ -22,6 +22,7 @@ Features:
     - Progress tracking and detailed logging
     - Metadata generation for processing runs
     - Support for partitioned data storage
+    - Cloud storage support (S3, GCS, Azure)
 """
 
 import argparse
@@ -35,20 +36,37 @@ import logging
 import subprocess
 import sys
 import os
+import io
 
 # Import from utils directory
 from utils.progress import get_progress_tracker
+from utils.common import DataManager, create_storage_backend
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class FeatureProcessor:
-    def __init__(self, config_path="config/settings.yaml"):
+    def __init__(self, config_path="config/settings.yaml", storage_provider="local", storage_config_path=None):
         self.config = self.load_config(config_path)
+        self.storage_provider = storage_provider
+        self.storage_config = self.load_storage_config(storage_config_path) if storage_config_path else {}
+        
+        # Initialize storage backend
+        self.storage_backend = self._create_storage_backend()
+        
+        # Initialize DataManager with storage backend
+        self.data_manager = DataManager(
+            base_dir="data",
+            test_mode=False,  # Will be set based on mode
+            storage_backend=self.storage_backend
+        )
+        
+        # Set up paths (these will be used for local operations, cloud operations use DataManager)
         self.raw_path = Path(self.config.get("raw_data_path", "data/raw"))
         self.processed_path = Path(self.config.get("processed_data_path", "data/processed"))
         self.historical_path = Path(self.config.get("historical_data_path", "data/raw/historical"))
         self.metadata_path = Path("logs/features")
         self.metadata_path.mkdir(parents=True, exist_ok=True)
+        
         # Determine mode from environment variable or config
         self.mode = os.environ.get('PIPELINE_MODE', None)
         if self.mode is None:
@@ -73,6 +91,57 @@ class FeatureProcessor:
         else:
             with open(path, "r") as f:
                 return json.load(f)
+
+    def load_storage_config(self, storage_config_path):
+        """Load cloud storage configuration."""
+        if not storage_config_path:
+            return {}
+        
+        try:
+            with open(storage_config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            logging.warning(f"Could not load storage config from {storage_config_path}: {e}")
+            return {}
+
+    def _create_storage_backend(self):
+        """Create storage backend based on provider and configuration."""
+        if self.storage_provider == "local":
+            return None  # Use local filesystem
+        
+        # Get provider-specific configuration
+        provider_config = self.storage_config.get(self.storage_provider, {})
+        
+        try:
+            if self.storage_provider == "s3":
+                return create_storage_backend(
+                    storage_type="s3",
+                    bucket_name=provider_config.get("bucket_name"),
+                    aws_access_key_id=provider_config.get("access_key_id"),
+                    aws_secret_access_key=provider_config.get("secret_access_key"),
+                    region_name=provider_config.get("region")
+                )
+            elif self.storage_provider == "gcs":
+                return create_storage_backend(
+                    storage_type="gcs",
+                    bucket_name=provider_config.get("bucket_name"),
+                    project_id=provider_config.get("project_id")
+                )
+            elif self.storage_provider == "azure":
+                # Azure backend would need to be implemented in common.py
+                logging.warning("Azure storage backend not yet implemented, falling back to local")
+                return None
+            else:
+                logging.warning(f"Unknown storage provider: {self.storage_provider}, falling back to local")
+                return None
+        except ImportError as e:
+            logging.warning(f"Cloud storage library not available: {e}")
+            logging.warning(f"Falling back to local storage for {self.storage_provider}")
+            return None
+        except Exception as e:
+            logging.warning(f"Error creating {self.storage_provider} storage backend: {e}")
+            logging.warning("Falling back to local storage")
+            return None
 
     def add_features(self, df, ticker=None):
         # Ensure date is a column and lowercase
@@ -127,22 +196,18 @@ class FeatureProcessor:
 
     def get_latest_raw_data(self, test_mode=False):
         """Get the latest raw data directory."""
-        if test_mode:
-            raw_base_path = Path("data/test/raw")
-        else:
-            raw_base_path = self.raw_path
+        # Update DataManager test mode
+        self.data_manager.test_mode = test_mode
         
-        if not raw_base_path.exists():
-            raise FileNotFoundError(f"Raw data directory not found: {raw_base_path}")
-        
-        # Find all dt=* directories and get the latest one
-        partitions = [d for d in raw_base_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
+        # Use DataManager to list partitions
+        partitions = self.data_manager.list_partitions("raw")
         if not partitions:
-            raise FileNotFoundError(f"No raw data partitions found in {raw_base_path}")
+            raise FileNotFoundError(f"No raw data partitions found")
         
-        latest_partition = max(partitions, key=lambda x: x.name)
-        logging.info(f"Found latest raw data partition: {latest_partition}")
-        return latest_partition
+        latest_partition_date = max(partitions)
+        latest_partition_path = self.data_manager.get_partition_path(latest_partition_date, "raw")
+        logging.info(f"Found latest raw data partition: {latest_partition_path}")
+        return latest_partition_path
     
     def load_historical_data(self, ticker: str) -> pd.DataFrame:
         """
@@ -155,6 +220,8 @@ class FeatureProcessor:
             DataFrame with historical data or empty DataFrame if not found
         """
         try:
+            # For historical data, we'll use the local filesystem approach
+            # since historical data is typically stored locally
             ticker_dir = self.historical_path / f"ticker={ticker}"
             if not ticker_dir.exists():
                 logging.debug(f"No historical data found for {ticker}")
@@ -244,14 +311,19 @@ class FeatureProcessor:
 
     def create_output_paths(self, date_str, test_mode=False):
         """Create output paths for processed data and metadata."""
+        # Update DataManager test mode
+        self.data_manager.test_mode = test_mode
+        
+        # Use DataManager to get processed partition path
+        processed_path = self.data_manager.get_partition_path(date_str, "processed")
+        
+        # Create metadata path (logs are typically local)
         if test_mode:
-            processed_path = Path("data/test/processed") / f"dt={date_str}"
             metadata_path = Path("logs/test/features") / f"dt={date_str}"
         else:
-            processed_path = self.processed_path / f"dt={date_str}"
             metadata_path = self.metadata_path / f"dt={date_str}"
         
-        processed_path.mkdir(parents=True, exist_ok=True)
+        # Ensure metadata directory exists (local operation)
         metadata_path.mkdir(parents=True, exist_ok=True)
         
         return processed_path, metadata_path
@@ -287,7 +359,11 @@ class FeatureProcessor:
         # Get latest raw data
         try:
             latest_raw = self.get_latest_raw_data(test_mode)
-            date_str = latest_raw.name[3:]  # Remove "dt=" prefix
+            # Extract date from path (remove "dt=" prefix)
+            if isinstance(latest_raw, str):
+                date_str = latest_raw.split('/')[-1][3:]  # Remove "dt=" prefix
+            else:
+                date_str = latest_raw.name[3:]  # Remove "dt=" prefix
         except FileNotFoundError as e:
             logging.error(f"Could not find raw data: {e}")
             return False
@@ -296,10 +372,21 @@ class FeatureProcessor:
         processed_path, metadata_path = self.create_output_paths(date_str, test_mode)
         
         # Get all CSV files in the raw data directory
-        csv_files = list(latest_raw.glob("*.csv"))
-        if not csv_files:
-            logging.error(f"No CSV files found in {latest_raw}")
-            return False
+        if self.storage_provider == "local" or self.storage_backend is None:
+            # Local filesystem approach
+            csv_files = list(Path(latest_raw).glob("*.csv"))
+            if not csv_files:
+                logging.error(f"No CSV files found in {latest_raw}")
+                return False
+        else:
+            # Cloud storage approach - list files using storage backend
+            csv_files = []
+            for item in self.storage_backend.listdir(latest_raw):
+                if item.endswith('.csv'):
+                    csv_files.append(f"{latest_raw}/{item}")
+            if not csv_files:
+                logging.error(f"No CSV files found in {latest_raw}")
+                return False
         
         logging.info(f"Found {len(csv_files)} CSV files to process")
         
@@ -307,7 +394,7 @@ class FeatureProcessor:
         if test_mode:
             # Limit to 5 files for test mode
             csv_files = csv_files[:5]
-            logging.info(f"[TEST MODE] Processing only 5 files: {[f.stem for f in csv_files]}")
+            logging.info(f"[TEST MODE] Processing only 5 files: {[Path(f).stem if isinstance(f, str) else f.stem for f in csv_files]}")
         
         # Process files with progress tracking
         show_progress = self.config.get("progress", True)
@@ -323,10 +410,15 @@ class FeatureProcessor:
             total_rows_dropped = 0
             
             for csv_file in csv_files:
-                ticker = csv_file.stem
+                ticker = Path(csv_file).stem if isinstance(csv_file, str) else csv_file.stem
                 try:
                     # Load data
-                    df = pd.read_csv(csv_file)
+                    if self.storage_provider == "local" or self.storage_backend is None:
+                        df = pd.read_csv(csv_file)
+                    else:
+                        # Read from cloud storage
+                        content = self.storage_backend.read_file(csv_file, mode='r')
+                        df = pd.read_csv(io.StringIO(content))
                     
                     # Add features using historical data if available
                     if self.config.get("incremental_mode", True):
@@ -365,9 +457,9 @@ class FeatureProcessor:
                 if dropped_tickers:
                     logging.info(f"Dropped {len(dropped_tickers)} tickers with <{min_rows} rows: {dropped_tickers}")
             
-            # Save processed data
-            output_file = processed_path / "features.parquet"
-            combined_df.to_parquet(output_file, index=False)
+            # Save processed data using DataManager
+            output_file = f"{processed_path}/features.parquet"
+            self.data_manager.save_dataframe(combined_df, output_file, format='parquet')
             
             # Calculate runtime
             runtime = time.time() - start_time
@@ -401,8 +493,10 @@ class FeatureProcessor:
             }
             
             metadata_file = metadata_path / "metadata.json"
+            # Save metadata locally (logs are typically kept local)
             with open(metadata_file, 'w') as f:
                 json.dump(metadata, f, indent=2)
+            logging.info(f"Metadata saved to: {metadata_file}")
             
             runtime = time.time() - start_time
             logging.info(f"Feature processing completed in {runtime:.2f} seconds")
@@ -427,7 +521,12 @@ def main():
     
     args = parser.parse_args()
     
-    processor = FeatureProcessor(args.config)
+    # Validate storage configuration
+    if args.storage_provider != 'local' and not args.storage_config:
+        print("Error: --storage-config is required when using cloud storage providers")
+        sys.exit(1)
+    
+    processor = FeatureProcessor(args.config, args.storage_provider, args.storage_config)
     
     # Progress configuration
     if args.no_progress:

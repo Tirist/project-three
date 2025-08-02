@@ -13,7 +13,7 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json
       - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
       - MAX_WORKERS=${MAX_WORKERS:-4}
       - CHUNK_SIZE=${CHUNK_SIZE:-1000}
@@ -22,6 +22,7 @@ services:
       - ./logs:/app/logs
       - ./reports:/app/reports
       - ./.env:/app/.env:ro
+      - ./service-account-key.json:/app/config/service-account-key.json:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
@@ -42,7 +43,7 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json
       - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
       - MAX_WORKERS=${MAX_WORKERS:-4}
       - CHUNK_SIZE=${CHUNK_SIZE:-1000}
@@ -51,6 +52,7 @@ services:
       - ./logs:/app/logs
       - ./reports:/app/reports
       - ./.env:/app/.env:ro
+      - ./service-account-key.json:/app/config/service-account-key.json:ro
       - .:/app
     ports:
       - "8888:8888"  # Jupyter notebook
@@ -67,12 +69,14 @@ services:
     container_name: stock-pipeline-test
     environment:
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/config/service-account-key.json
       - TEST_MODE=true
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./reports:/app/reports
       - ./.env:/app/.env:ro
+      - ./service-account-key.json:/app/config/service-account-key.json:ro
     command: ["python", "-m", "pytest", "tests/", "-v"]
     profiles:
       - test
