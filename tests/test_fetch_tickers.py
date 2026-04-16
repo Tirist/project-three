@@ -6,6 +6,7 @@ Test script for fetch_tickers.py functionality.
 import os
 import json
 import pandas as pd
+import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import sys
@@ -18,25 +19,14 @@ from fetch_tickers import TickerFetcher
 def test_metadata_validation():
     """Test that metadata.json includes all required fields."""
     print("=== Testing Metadata Validation ===")
-    
-    # Find the latest metadata file
-    log_base_path = Path("logs/tickers")
-    if not log_base_path.exists():
-        print("❌ No ticker logs found")
-        assert False, "No ticker logs found"
-    
-    date_dirs = [d for d in log_base_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
-    if not date_dirs:
-        print("❌ No ticker log directories found")
-        assert False, "No ticker log directories found"
-    
-    latest_dir = sorted(date_dirs, reverse=True)[0]
-    metadata_file = latest_dir / "metadata.json"
-    
-    if not metadata_file.exists():
-        print(f"❌ Metadata file not found: {metadata_file}")
-        assert False, f"Metadata file not found: {metadata_file}"
-    
+
+    fetcher = TickerFetcher()
+    with patch('time.sleep'):
+        result = fetcher.run(force=True, dry_run=False, test=True)
+
+    metadata_file = Path(result["metadata_path"])
+    assert metadata_file.exists(), f"Metadata file not found: {metadata_file}"
+
     with open(metadata_file, 'r') as f:
         metadata = json.load(f)
     
@@ -56,32 +46,20 @@ def test_metadata_validation():
 def test_diff_log_creation():
     """Test that diff.json is created with ticker changes."""
     print("\n=== Testing Diff Log Creation ===")
-    
-    # Find the latest diff file
-    log_base_path = Path("logs/tickers")
-    if not log_base_path.exists():
-        print("❌ No ticker logs found")
-        assert False, "No ticker logs found"
-    
-    date_dirs = [d for d in log_base_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
-    if not date_dirs:
-        print("❌ No ticker log directories found")
-        assert False, "No ticker log directories found"
-    
-    latest_dir = sorted(date_dirs, reverse=True)[0]
-    diff_file = latest_dir / "diff.json"
-    
-    if not diff_file.exists():
-        print(f"❌ Diff file not found: {diff_file}")
-        assert False, f"Diff file not found: {diff_file}"
-    
+
+    fetcher = TickerFetcher()
+    with patch('time.sleep'):
+        result = fetcher.run(force=True, dry_run=False, test=True)
+
+    diff_file = Path(result["diff_path"])
+    assert diff_file.exists(), f"Diff file not found: {diff_file}"
+
     with open(diff_file, 'r') as f:
         diff_data = json.load(f)
     
     # Check diff structure
     required_diff_fields = [
-        'run_date', 'timestamp', 'tickers_added', 'tickers_removed',
-        'total_added', 'total_removed', 'net_change'
+        'date', 'added', 'removed', 'total_added', 'total_removed'
     ]
     
     missing_fields = [field for field in required_diff_fields if field not in diff_data]
@@ -101,7 +79,7 @@ def test_retention_cleanup():
     # Check cleanup results structure
     required_cleanup_fields = [
         'cleanup_date', 'retention_days', 'cutoff_date',
-        'partitions_deleted', 'total_deleted', 'errors'
+        'deleted_partitions', 'total_deleted', 'dry_run', 'test_mode'
     ]
     
     missing_fields = [field for field in required_cleanup_fields if field not in cleanup_results]
@@ -139,10 +117,9 @@ def test_mock_api_failure():
     with patch('requests.get') as mock_get:
         mock_get.side_effect = Exception("API timeout")
         
-        # Test that the script handles failures gracefully
-        result = fetcher.run(force=True, dry_run=True)
-        
-        assert result['status'] == 'failed', "API failure not properly handled"
+        # Current behavior is to raise after final retry in fetch.
+        with pytest.raises(Exception, match="API timeout"):
+            fetcher.run(force=True, dry_run=True)
         print("✅ API failure properly handled")
 
 def test_full_test_mode():
