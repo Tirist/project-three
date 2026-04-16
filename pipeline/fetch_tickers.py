@@ -111,17 +111,29 @@ class TickerFetcher:
             Tuple of (tickers, company_names) lists
         """
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        # Wikipedia may return 403 for requests with default client headers.
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
         
         for attempt in range(self.config.get("api_retry_attempts", 3)):
             try:
                 logging.info(f"Fetching S&P 500 tickers from Wikipedia (attempt {attempt + 1})")
-                response = requests.get(url, timeout=30)
+                response = requests.get(url, headers=headers, timeout=30)
                 response.raise_for_status()
                 
                 soup = BeautifulSoup(response.content, 'html.parser')
                 
-                # Find the main table with ticker data
-                table = soup.find('table', {'class': 'wikitable'})
+                # Prefer the canonical constituents table id; fallback to first wikitable.
+                table = soup.find('table', {'id': 'constituents'})
+                if not table:
+                    table = soup.find('table', {'class': 'wikitable'})
                 if not table:
                     raise ValueError("Could not find ticker table on Wikipedia page")
                 
