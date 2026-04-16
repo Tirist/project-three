@@ -740,6 +740,7 @@ class OHLCVFetcher:
             "tickers_processed": 0,
             "tickers_successful": 0,
             "tickers_failed": 0,
+            "skipped_tickers": 0,
             "status": "failed",
             "runtime_seconds": 0,
             "runtime_minutes": 0,
@@ -765,13 +766,6 @@ class OHLCVFetcher:
                 cleanup_results = self.cleanup_old_partitions(dry_run, test)
                 logging.info(f"Cleanup completed: {cleanup_results['total_deleted']} partitions deleted")
             
-            # Check if partition already exists
-            if not force and self.check_existing_partition(date_str, test):
-                logging.info("Partition already exists and force=False, skipping fetch")
-                metadata["status"] = "skipped"
-                metadata["error_message"] = "Partition already exists"
-                return metadata
-            
             # Get latest ticker file
             ticker_file = self.get_latest_ticker_file(test)
             if not ticker_file:
@@ -794,6 +788,28 @@ class OHLCVFetcher:
             
             # Create partition paths
             data_path, log_path = self.create_partition_paths(date_str, test)
+
+            # Check if partition already exists
+            if not force and self.check_existing_partition(date_str, test):
+                logging.info("Partition already exists and force=False, skipping fetch")
+                runtime = time.time() - start_time
+                existing_csvs = list(data_path.glob("*.csv"))
+                processed = len(existing_csvs)
+                metadata.update({
+                    "tickers_processed": processed,
+                    "tickers_successful": processed,
+                    "tickers_failed": 0,
+                    "skipped_tickers": len(tickers_to_process),
+                    "status": "skipped",
+                    "error_message": "Partition already exists",
+                    "runtime_seconds": round(runtime, 2),
+                    "runtime_minutes": round(runtime / 60, 2),
+                    "data_path": str(data_path),
+                    "metadata_path": str(log_path / "metadata.json"),
+                    "errors_path": None,
+                })
+                self.save_metadata(metadata, log_path, dry_run)
+                return metadata
             
             # Configure parallel processing
             parallel_workers = self.config.get("parallel_workers")
