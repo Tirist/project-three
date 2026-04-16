@@ -140,8 +140,15 @@ class TickerFetcher:
                 tickers = []
                 company_names = []
                 
-                # Extract ticker symbols and company names from table rows
-                rows = table.find_all('tr')[1:]  # Skip header row
+                # Extract ticker symbols and company names from table rows.
+                # Some test fixtures (and occasional upstream table variants) may
+                # not include an explicit header row, so detect-and-skip only if
+                # the first row uses header cells.
+                all_rows = table.find_all('tr')
+                if all_rows and all_rows[0].find_all('th'):
+                    rows = all_rows[1:]
+                else:
+                    rows = all_rows
                 for row in rows:
                     cells = row.find_all('td')
                     if len(cells) >= 2:
