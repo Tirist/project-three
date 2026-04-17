@@ -14,14 +14,36 @@ from pathlib import Path
 
 # Add pipeline directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "pipeline"))
+import fetch_tickers
 from fetch_tickers import TickerFetcher
+
+
+def _mock_wikipedia_html_response(min_rows: int = 5):
+    """Minimal Wikipedia-style table parseable by fetch_sp500_tickers (no network)."""
+    rows = "".join(
+        f"<tr><td>T{i:03d}</td><td>Test Co {i}</td></tr>"
+        for i in range(min_rows)
+    )
+    html = (
+        b"<html><body><table id=\"constituents\" class=\"wikitable\">"
+        b"<tr><th>Symbol</th><th>Security</th></tr>"
+        + rows.encode("utf-8")
+        + b"</table></body></html>"
+    )
+    mock_response = MagicMock()
+    mock_response.content = html
+    mock_response.raise_for_status = MagicMock()
+    return mock_response
+
 
 def test_metadata_validation():
     """Test that metadata.json includes all required fields."""
     print("=== Testing Metadata Validation ===")
 
     fetcher = TickerFetcher()
-    with patch('time.sleep'):
+    with patch("time.sleep"), patch.object(
+        fetch_tickers.requests, "get", return_value=_mock_wikipedia_html_response()
+    ):
         result = fetcher.run(force=True, dry_run=False, test=True)
 
     metadata_file = Path(result["metadata_path"])
@@ -35,7 +57,8 @@ def test_metadata_validation():
         'run_date', 'source_primary', 'source_secondary', 'tickers_fetched',
         'tickers_added', 'tickers_removed', 'skipped_tickers', 'status',
         'runtime_seconds', 'runtime_minutes', 'api_retries', 'rate_limit_hits',
-        'rate_limit_strategy', 'error_message', 'full_test_mode', 'dry_run_mode'
+        'rate_limit_strategy', 'error_message', 'full_test_mode', 'test_mode',
+        'dry_run_mode',
     ]
     
     missing_fields = [field for field in required_fields if field not in metadata]
@@ -48,7 +71,9 @@ def test_diff_log_creation():
     print("\n=== Testing Diff Log Creation ===")
 
     fetcher = TickerFetcher()
-    with patch('time.sleep'):
+    with patch("time.sleep"), patch.object(
+        fetch_tickers.requests, "get", return_value=_mock_wikipedia_html_response()
+    ):
         result = fetcher.run(force=True, dry_run=False, test=True)
 
     diff_file = Path(result["diff_path"])
@@ -113,11 +138,9 @@ def test_mock_api_failure():
     
     fetcher = TickerFetcher()
     
-    # Mock requests.get to simulate API failure
-    with patch('requests.get') as mock_get:
-        mock_get.side_effect = Exception("API timeout")
-        
-        # Current behavior is to raise after final retry in fetch.
+    with patch("time.sleep"), patch.object(
+        fetch_tickers.requests, "get", side_effect=Exception("API timeout")
+    ):
         with pytest.raises(Exception, match="API timeout"):
             fetcher.run(force=True, dry_run=True)
         print("✅ API failure properly handled")
@@ -129,12 +152,11 @@ def test_full_test_mode():
     fetcher = TickerFetcher()
     
     # Test full-test mode with dry-run
-    with patch('requests.get') as mock_get:
-        # Mock successful response
-        mock_response = MagicMock()
-        mock_response.content = b"<html><table class='wikitable'><tr><td>AAPL</td><td>Apple</td></tr></table></html>"
-        mock_get.return_value = mock_response
-        
+    with patch.object(
+        fetch_tickers.requests,
+        "get",
+        return_value=_mock_wikipedia_html_response(min_rows=1),
+    ):
         result = fetcher.run(force=True, dry_run=True, full_test=True)
         
         assert result.get('full_test_mode') == True, "Full test mode not properly enabled"
@@ -147,12 +169,11 @@ def test_dry_run_mode():
     fetcher = TickerFetcher()
     
     # Test dry-run mode
-    with patch('requests.get') as mock_get:
-        # Mock successful response
-        mock_response = MagicMock()
-        mock_response.content = b"<html><table class='wikitable'><tr><td>AAPL</td><td>Apple</td></tr></table></html>"
-        mock_get.return_value = mock_response
-        
+    with patch.object(
+        fetch_tickers.requests,
+        "get",
+        return_value=_mock_wikipedia_html_response(min_rows=1),
+    ):
         result = fetcher.run(force=True, dry_run=True)
         
         assert result.get('dry_run_mode') == True, "Dry run mode not properly enabled"
