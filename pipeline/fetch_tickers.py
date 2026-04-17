@@ -75,7 +75,10 @@ class TickerFetcher:
             "base_cooldown_seconds": 1,
             "max_cooldown_seconds": 60,
             "batch_size": 10,
-            "performance_logging": True
+            "performance_logging": True,
+            # Wikipedia is a public page; env HTTP(S)_PROXY often breaks CONNECT (403).
+            # Set true only if you must route this request through a corporate proxy.
+            "wikipedia_trust_env": False,
         }
         
         try:
@@ -125,7 +128,15 @@ class TickerFetcher:
         for attempt in range(self.config.get("api_retry_attempts", 3)):
             try:
                 logging.info(f"Fetching S&P 500 tickers from Wikipedia (attempt {attempt + 1})")
-                response = requests.get(url, headers=headers, timeout=30)
+                trust_env = self.config.get("wikipedia_trust_env", False)
+                session = requests.Session()
+                if hasattr(session, "trust_env"):
+                    session.trust_env = trust_env
+                response = session.get(
+                    url,
+                    headers=headers,
+                    timeout=30,
+                )
                 response.raise_for_status()
                 
                 soup = BeautifulSoup(response.content, 'html.parser')

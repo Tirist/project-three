@@ -51,6 +51,33 @@ class FeatureProcessor:
             with open(path, "r") as f:
                 return json.load(f)
 
+    def normalize_date_column(self, df: pd.DataFrame, column: str = "date", ticker: str | None = None) -> pd.DataFrame:
+        """
+        Normalize datetime values into a single, parquet-safe representation.
+
+        Strategy:
+        - Parse all datetimes as UTC to handle mixed offsets/timezones safely.
+        - Convert to timezone-naive UTC timestamps for consistent downstream storage.
+        - Drop rows with invalid/unparseable datetime values.
+        """
+        if column not in df.columns:
+            return df
+
+        df = df.copy()
+        parsed = pd.to_datetime(df[column], utc=True, errors="coerce")
+        invalid_count = int(parsed.isna().sum())
+        if invalid_count:
+            logging.warning(
+                f"Dropping {invalid_count} rows with invalid {column} values"
+                + (f" for {ticker}" if ticker else "")
+            )
+            df = df.loc[~parsed.isna()].copy()
+            parsed = parsed.loc[~parsed.isna()]
+
+        # Store as timezone-naive UTC for parquet compatibility across engines.
+        df[column] = parsed.dt.tz_localize(None)
+        return df
+
     def add_features(self, df, ticker=None):
         # Ensure date is a column and lowercase
         if 'date' not in df.columns:
@@ -58,7 +85,7 @@ class FeatureProcessor:
                 df = df.reset_index()
             else:
                 df['date'] = df.index
-        df['date'] = pd.to_datetime(df['date'])
+        df = self.normalize_date_column(df, "date", ticker=ticker)
         if ticker is not None:
             df['ticker'] = ticker
         df.columns = [c.lower() for c in df.columns]
@@ -151,7 +178,7 @@ class FeatureProcessor:
             
             # Combine all years
             combined_df = pd.concat(all_data, ignore_index=True)
-            combined_df['date'] = pd.to_datetime(combined_df['date'])
+            combined_df = self.normalize_date_column(combined_df, "date", ticker=ticker)
             combined_df = combined_df.sort_values('date').reset_index(drop=True)
             
             logging.debug(f"Loaded {len(combined_df)} historical rows for {ticker}")
@@ -179,8 +206,8 @@ class FeatureProcessor:
             return current_data
         
         # Ensure date columns are datetime
-        current_data['date'] = pd.to_datetime(current_data['date'])
-        historical_df['date'] = pd.to_datetime(historical_df['date'])
+        current_data = self.normalize_date_column(current_data, "date", ticker=ticker)
+        historical_df = self.normalize_date_column(historical_df, "date", ticker=ticker)
         
         # Combine data, keeping the most recent version of any duplicate dates
         combined_df = pd.concat([historical_df, current_data], ignore_index=True)

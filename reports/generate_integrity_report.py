@@ -6,9 +6,9 @@ Generates integrity reports from existing pipeline data without running the full
 Useful for generating reports from historical data or for manual analysis.
 
 Usage:
-    python scripts/generate_integrity_report.py --type daily
-    python scripts/generate_integrity_report.py --type weekly --date 2025-07-25
-    python scripts/generate_integrity_report.py --type daily --format markdown
+    python reports/generate_integrity_report.py --type daily
+    python reports/generate_integrity_report.py --type weekly --date 2025-07-25
+    python reports/generate_integrity_report.py --type daily --format markdown
 """
 
 import argparse

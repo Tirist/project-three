@@ -4,9 +4,8 @@
 
 ### 🛠️ Tools
 - **`tools/diagnostics/`** - Diagnostic and analysis tools
-  - `evaluate_bootstrap_failures.py` - Analyze bootstrap job failures
   - `investigate_api_issues.py` - Test API connectivity
-  - `fix_test_suite.py` - Fix test suite issues
+  - `archive/2026-04-cleanup/tools/diagnostics/` - Archived one-off diagnostics (`fix_test_suite.py`, `evaluate_bootstrap_failures.py`)
 
 - **`tools/monitoring/`** - Monitoring and dashboard tools
   - `generate_dashboard_report.py` - Generate dashboard reports
@@ -14,7 +13,8 @@
 - **`tools/maintenance/`** - Maintenance and cleanup tools
   - `terminate_stuck_run.py` - Terminate stuck pipeline runs
   - `bootstrap_historical_data.py` - Bootstrap historical data
-  - `demo_bootstrap.py` - Demo bootstrap functionality
+  - `bootstrap_yfinance.py` - Primary bootstrap path (recommended)
+  - `archive/2026-04-cleanup/tools/maintenance/` - Archived one-off maintenance scripts (`demo_bootstrap.py`, `organize_project.py`)
 
 ### 📊 Reports
 - **`reports/dashboard/`** - Dashboard reports and summaries
@@ -54,16 +54,15 @@
 
 ## 📋 Recent Actions
 
-- ✅ Terminated stuck weekly run
-- ✅ Fixed test suite issues
-- ✅ Investigated API connectivity
-- ✅ Organized project structure
+- ✅ Archived legacy one-off scripts and snapshot reports
+- ✅ Preserved archive manifest for future restoration
+- ✅ Kept active monitoring and maintenance paths live
 
 ## 🎯 Next Steps
 
-1. Fix bootstrap rate limiting issues
-2. Optimize pipeline performance
-3. Implement monitoring system
+1. Use `tools/maintenance/bootstrap_yfinance.py` for large bootstrap runs
+2. Keep `archive/README.md` current as new files are retired
+3. Continue docs cleanup as operational workflows evolve
 
 ---
-*Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+*Last Updated: 2026-04-16*

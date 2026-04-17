@@ -281,4 +281,4 @@ def main():
     print("⚡ Use check_status.py and run_diagnostics.py for quick access")
 
 if __name__ == "__main__":
-    main() 
+    main()

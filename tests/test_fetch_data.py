@@ -16,23 +16,26 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "pipeline"))
 from fetch_data import OHLCVFetcher
 import pytest
 
+def _latest_partition_dir(candidates):
+    """Return newest dt=* directory from candidate base paths."""
+    dated_dirs = []
+    for base in candidates:
+        if base.exists():
+            dated_dirs.extend([d for d in base.iterdir() if d.is_dir() and d.name.startswith("dt=")])
+    if not dated_dirs:
+        return None
+    return sorted(dated_dirs, reverse=True)[0]
+
 @pytest.mark.quick
 def test_metadata_matches_processed_count():
     """Test that metadata.json matches the processed ticker count."""
     print("=== Testing Metadata vs Processed Count ===")
     
-    # Find the latest metadata file
-    log_base_path = Path("logs/fetch")
-    if not log_base_path.exists():
-        print("❌ No fetch logs found")
-        assert False, "No fetch logs found"
-    
-    date_dirs = [d for d in log_base_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
-    if not date_dirs:
+    latest_dir = _latest_partition_dir([Path("logs/fetch"), Path("logs/test/fetch")])
+    if latest_dir is None:
         print("❌ No fetch log directories found")
         assert False, "No fetch log directories found"
-    
-    latest_dir = sorted(date_dirs, reverse=True)[0]
+
     metadata_file = latest_dir / "metadata.json"
     
     if not metadata_file.exists():
@@ -67,18 +70,10 @@ def test_data_columns():
     """Test that each ticker CSV has the expected columns."""
     print("\n=== Testing Data Column Structure ===")
     
-    # Find the latest data directory
-    data_base_path = Path("data/raw")
-    if not data_base_path.exists():
-        print("❌ No raw data directory found")
-        assert False, "No raw data directory found"
-    
-    date_dirs = [d for d in data_base_path.iterdir() if d.is_dir() and d.name.startswith('dt=')]
-    if not date_dirs:
+    latest_dir = _latest_partition_dir([Path("data/raw"), Path("data/test/raw")])
+    if latest_dir is None:
         print("❌ No raw data directories found")
         assert False, "No raw data directories found"
-    
-    latest_dir = sorted(date_dirs, reverse=True)[0]
     
     # Define expected column patterns (both standard and numbered formats)
     expected_columns_patterns = [

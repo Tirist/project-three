@@ -13,14 +13,21 @@ The pipeline now supports:
 
 ### 1. Bootstrap Historical Data (One-time)
 
-First, bootstrap 2 years of historical data for all S&P 500 tickers:
+Use the yfinance bootstrap path first for best reliability and speed:
+
+```bash
+# Preferred bootstrap path (no API key required)
+python tools/maintenance/bootstrap_yfinance.py --sp500 --batch-size 20
+```
+
+If you need the legacy Alpha Vantage flow, use this:
 
 ```bash
 # Set your Alpha Vantage API key
 export ALPHA_VANTAGE_API_KEY="your_api_key_here"
 
-# Run bootstrap (this will take several hours due to rate limits)
-python bootstrap_historical_data.py --api-key $ALPHA_VANTAGE_API_KEY
+# Run legacy bootstrap (slower due to rate limits)
+python tools/maintenance/bootstrap_historical_data.py --api-key $ALPHA_VANTAGE_API_KEY
 ```
 
 **Expected Output:**
@@ -53,7 +60,7 @@ python pipeline/run_pipeline.py --weekly-integrity
 The bootstrap script supports several options:
 
 ```bash
-python bootstrap_historical_data.py \
+python tools/maintenance/bootstrap_historical_data.py \
     --api-key YOUR_API_KEY \
     --output-dir data/raw/historical \
     --batch-size 10 \
@@ -181,7 +188,7 @@ tail -f logs/features/dt=2025-07-28/processing.log
 **Rate Limit Errors:**
 ```bash
 # Increase delays between calls
-python bootstrap_historical_data.py --api-key YOUR_KEY --batch-size 5
+python tools/maintenance/bootstrap_historical_data.py --api-key YOUR_KEY --batch-size 5
 ```
 
 **Partial Failures:**
@@ -190,7 +197,7 @@ python bootstrap_historical_data.py --api-key YOUR_KEY --batch-size 5
 cat data/raw/historical/bootstrap_summary.json
 
 # Retry failed tickers
-python bootstrap_historical_data.py --api-key YOUR_KEY --tickers FAILED_TICKER1 FAILED_TICKER2
+python tools/maintenance/bootstrap_historical_data.py --api-key YOUR_KEY --tickers FAILED_TICKER1 FAILED_TICKER2
 ```
 
 ### Incremental Issues
@@ -201,7 +208,7 @@ python bootstrap_historical_data.py --api-key YOUR_KEY --tickers FAILED_TICKER1 
 ls data/raw/historical/ticker=AAPL/
 
 # Re-run bootstrap if needed
-python bootstrap_historical_data.py --api-key YOUR_KEY
+python tools/maintenance/bootstrap_historical_data.py --api-key YOUR_KEY
 ```
 
 **Data Gaps:**

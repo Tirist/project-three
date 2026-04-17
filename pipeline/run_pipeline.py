@@ -340,18 +340,17 @@ def main():
 
     # 3. process_features.py - Process features and create parquet file
     features_cmd = [sys.executable, 'pipeline/process_features.py']
-    if args.prod:
-        # Production mode: full feature processing
-        features_cmd.append('--drop-incomplete')
-    elif args.full_test:
+    if args.full_test:
         # Full test mode: comprehensive feature processing
         features_cmd.extend(['--full-test', '--drop-incomplete'])
     elif test_mode:
         # Test mode: limited feature processing
         features_cmd.append('--test-mode')
-    else:
-        # Default: full feature processing
+    elif not args.prod:
+        # Default / manual full: keep length gate on combined output
         features_cmd.append('--drop-incomplete')
+    # Prod: base command only — recent feature slice for every ticker; raw OHLCV stays
+    # under data/raw/. Apply completeness/quality filters in downstream analytics.
     
     features_ok, f_time = True, 0
     if not (args.prod and args.skip_process):
@@ -493,7 +492,7 @@ def main():
     if args.prod:
         print(f"Errors: {errors if errors else 'None'}")
         print("\n=== PROD RUN COMPLETE ===\n")
-        sys.exit(0)
+        sys.exit(0 if success else 1)
     if args.full_test:
         print("Test mode: FULL (all tests including heavy tests)")
     elif test_mode:

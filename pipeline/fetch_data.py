@@ -1029,8 +1029,9 @@ def main():
         print(f"Rate Limit Hits: {result['rate_limit_hits']}")
     if result.get('total_sleep_time', 0) > 0:
         print(f"Total Sleep Time: {result['total_sleep_time']} seconds")
-    if result.get('parallel_workers', 0) > 0:
-        print(f"Parallel Workers: {result['parallel_workers']}")
+    parallel_workers = result.get('parallel_workers') or 0
+    if parallel_workers > 0:
+        print(f"Parallel Workers: {parallel_workers}")
     if result.get('status') == 'success':
         print(f"Data saved to: {result.get('data_path','')}")
         print(f"Metadata saved to: {result.get('metadata_path','')}")
@@ -1044,8 +1045,8 @@ def main():
     print(f"Tickers processed: {result.get('tickers_processed', 0)}")
     print(f"Total runtime: {result.get('runtime_seconds', 0)} seconds")
     print(f"Total sleep time: {result.get('total_sleep_time', 0)} seconds")
-    print(f"Parallel Workers: {result.get('parallel_workers', 0)} (final: {result.get('parallel_workers', 0)})")
-    print(f"Adaptive Reductions: [{result.get('parallel_workers', 0)}]")
+    print(f"Parallel Workers: {parallel_workers} (final: {parallel_workers})")
+    print(f"Adaptive Reductions: [{parallel_workers}]")
     print(f"Total Threads Executed: {result.get('tickers_processed', 0)}")
     print(f"Errors: {result.get('errors_path', '')}")
     
