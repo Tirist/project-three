@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.projectthree.pipeline.prod-data</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>REPLACE_WITH_ABSOLUTE_REPO_PATH/ops/run_prod_data.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>REPLACE_WITH_ABSOLUTE_REPO_PATH</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PIPELINE_MODE</key>
+    <string>prod</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>REPLACE_WITH_ABSOLUTE_REPO_PATH/logs/launchd_prod_data.log</string>
+  <key>StandardErrorPath</key>
+  <string>REPLACE_WITH_ABSOLUTE_REPO_PATH/logs/launchd_prod_data.err.log</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+</dict>
+</plist>

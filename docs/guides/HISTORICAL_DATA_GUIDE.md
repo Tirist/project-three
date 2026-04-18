@@ -40,18 +40,24 @@ python tools/maintenance/bootstrap_historical_data.py --api-key $ALPHA_VANTAGE_A
 
 The pipeline automatically uses incremental mode when historical data is available. No additional configuration needed.
 
-### 3. Run Daily Pipeline
+### 3. Run daily pipeline (production data)
 
-The daily pipeline now:
+The daily pipeline:
 - Checks for existing historical data
 - Fetches only new data since last update
 - Merges with historical data seamlessly
 - Calculates technical indicators using full historical context
 
+**Golden path (full universe, production `data/` directories):**
+
 ```bash
-# Run daily pipeline (now much faster!)
-python pipeline/run_pipeline.py --weekly-integrity
+python pipeline/run_pipeline.py --full --parallel 8 --skip-tests
+# or: bash ops/run_prod_data.sh
 ```
+
+`--daily-integrity` / `scripts/run_daily_tests.py` are **smoke** runs (subset tickers, `data/test/` only), not a substitute for the full daily data job.
+
+**`--drop-incomplete` and `--full-test`:** These drop tickers with fewer than **500 combined** rows (historical + current). If historical bootstrap is shallow, the features output can be **empty**. Use `--drop-incomplete` only after historical depth is sufficient, or for explicit modeling filters—not for routine daily data unless you understand the gate.
 
 ## Configuration
 

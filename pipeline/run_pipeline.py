@@ -11,9 +11,13 @@ Orchestrates the full stock evaluation pipeline:
 
 Usage:
     python run_pipeline.py --test
-    python run_pipeline.py --full --parallel 8 --drop-incomplete
+    python run_pipeline.py --full --parallel 8                    # golden path: full universe + pytest
+    python run_pipeline.py --full --parallel 8 --skip-tests      # scheduled data build (see ops/run_prod_data.sh)
+    python run_pipeline.py --full --drop-incomplete              # strict 500-row gate for downstream ML
+    python run_pipeline.py --prod                              # recovery: wipes all processed/features then full run
+    python run_pipeline.py --prod --prod-no-clean              # routine-style prod fetch without global wipe
     python run_pipeline.py --full-test
-    python run_pipeline.py --daily-integrity
+    python run_pipeline.py --daily-integrity                   # smoke: subset tickers, data/test only
     python run_pipeline.py --weekly-integrity
 """
 import subprocess
@@ -26,6 +30,7 @@ import shutil
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 # Import common utilities
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
@@ -124,6 +129,118 @@ def save_integrity_report(report, report_type="daily"):
     logging.info(f"Integrity report saved to: {report_file}")
     return report_file
 
+
+def _load_settings_dict() -> Dict[str, Any]:
+    path = Path("config/settings.yaml")
+    if not path.exists():
+        return {}
+    try:
+        import yaml
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logging.warning("Could not load config/settings.yaml: %s", e)
+        return {}
+
+
+def _list_dt_partitions(processed_root: Path) -> List[Tuple[datetime, Path]]:
+    out: List[Tuple[datetime, Path]] = []
+    if not processed_root.exists():
+        return out
+    for d in processed_root.iterdir():
+        if not d.is_dir() or not d.name.startswith("dt="):
+            continue
+        try:
+            ds = datetime.strptime(d.name[3:], "%Y-%m-%d")
+        except ValueError:
+            continue
+        out.append((ds, d))
+    return out
+
+
+def _prior_processed_partition(today: datetime, processed_root: Path) -> Optional[Path]:
+    """Latest processed partition strictly before local calendar date of `today`."""
+    best: Optional[Path] = None
+    best_dt: Optional[datetime] = None
+    for ds, d in _list_dt_partitions(processed_root):
+        if ds.date() < today.date():
+            if best_dt is None or ds > best_dt:
+                best_dt = ds
+                best = d
+    return best
+
+
+def validate_production_features_output(test_mode: bool, today: datetime) -> Tuple[bool, str]:
+    """
+    Enforce minimum row/ticker counts on today's features.parquet for full production runs.
+    """
+    if test_mode:
+        return True, ""
+
+    cfg = _load_settings_dict()
+    ov = cfg.get("output_validation") or {}
+    if ov.get("enabled") is False:
+        return True, ""
+
+    processed_root = Path(cfg.get("processed_data_path", "data/processed"))
+    today_str = today.strftime("dt=%Y-%m-%d")
+    features_path = processed_root / today_str / "features.parquet"
+    if not features_path.exists():
+        return False, f"Missing {features_path}"
+
+    min_rows = int(ov.get("min_total_rows", 1))
+    default_floor = max(1, int(int(cfg.get("min_tickers_expected", 500)) * 0.8))
+    min_tickers = int(ov.get("min_distinct_tickers", default_floor))
+
+    try:
+        import pandas as pd
+
+        df = pd.read_parquet(features_path)
+    except Exception as e:
+        return False, f"Could not read {features_path}: {e}"
+
+    n_rows = len(df)
+    if n_rows < min_rows:
+        return False, f"features.parquet row count {n_rows} < min_total_rows {min_rows}"
+
+    if "ticker" not in df.columns:
+        return False, "features.parquet has no 'ticker' column"
+
+    n_tickers = int(df["ticker"].nunique())
+    if n_tickers < min_tickers:
+        return (
+            False,
+            f"distinct tickers {n_tickers} < min_distinct_tickers {min_tickers}",
+        )
+
+    ratio = ov.get("min_tickers_ratio_of_prior_day")
+    if ratio is not None:
+        try:
+            ratio_f = float(ratio)
+        except (TypeError, ValueError):
+            ratio_f = 0.0
+        if 0 < ratio_f <= 1.0:
+            prior_dir = _prior_processed_partition(today, processed_root)
+            if prior_dir is not None:
+                prior_parquet = prior_dir / "features.parquet"
+                if prior_parquet.exists():
+                    try:
+                        prior_df = pd.read_parquet(prior_parquet)
+                        if "ticker" in prior_df.columns:
+                            prior_n = int(prior_df["ticker"].nunique())
+                            need = int(prior_n * ratio_f)
+                            if prior_n > 0 and n_tickers < need:
+                                return (
+                                    False,
+                                    f"distinct tickers {n_tickers} < "
+                                    f"{ratio_f:.2f} * prior_day ({prior_n}) => {need}",
+                                )
+                    except Exception as e:
+                        logging.warning("Could not compare to prior partition: %s", e)
+
+    return True, ""
+
+
 def clean_pipeline_data(test_mode=False):
     """Delete data/processed/* and logs/features/* for a fresh test run."""
     if test_mode:
@@ -191,14 +308,32 @@ def main():
     parser.add_argument('--test', action='store_true', help='Run pipeline in test mode (small dataset, quick tests)')
     parser.add_argument('--full', action='store_true', help='Run pipeline in full mode (default)')
     parser.add_argument('--full-test', action='store_true', help='Run full pipeline and all tests (including heavy tests)')
-    parser.add_argument('--prod', action='store_true', help='Run pipeline in production mode (full data, no test/sample flags, always clean)')
+    parser.add_argument(
+        '--prod',
+        action='store_true',
+        help='Production mode: full universe, skips pytest. By default deletes ALL of data/processed and logs/features first (recovery); use --prod-no-clean for routine runs.',
+    )
+    parser.add_argument(
+        '--prod-no-clean',
+        action='store_true',
+        help='With --prod only: do not wipe entire processed/features logs before run (keeps prior dt= partitions).',
+    )
     parser.add_argument('--skip-fetch', action='store_true', help='Skip fetch_tickers and fetch_data if data is up-to-date')
     parser.add_argument('--skip-process', action='store_true', help='Skip process_features.py step')
     parser.add_argument('--parallel', type=int, default=None, help='Parallel worker count for fetch_data.py')
-    parser.add_argument('--drop-incomplete', action='store_true', help='Drop tickers with <500 rows in process_features.py')
+    parser.add_argument(
+        '--drop-incomplete',
+        action='store_true',
+        help='Pass --drop-incomplete to process_features (drops tickers with <500 combined rows; empty output if history is short)',
+    )
     parser.add_argument('--auto-install-pytest', action='store_true', help='Auto-install pytest if missing')
     parser.add_argument('--clean', '--force-clean', action='store_true', dest='force_clean', help='Delete processed and log data before running pipeline')
     parser.add_argument('--no-clean', action='store_true', help='Do not clean data before running pipeline (overrides --test clean)')
+    parser.add_argument(
+        '--skip-tests',
+        action='store_true',
+        help='Skip pytest after pipeline stages (use for scheduled production data builds).',
+    )
     
     # New integrity reporting arguments
     parser.add_argument('--daily-integrity', action='store_true', help='Run daily integrity check with smoke tests')
@@ -269,8 +404,11 @@ def main():
     if args.prod:
         print("\n=== PROD RUN START ===\n")
         print("==================== PROD MODE ====================\n")
-        print("[PROD] Cleaning all processed and log data before run.")
-        clean_pipeline_data(test_mode=False)
+        if args.prod_no_clean:
+            print("[PROD] Skipping global clean (--prod-no-clean); existing processed partitions are kept.\n")
+        else:
+            print("[PROD] Cleaning all processed and log data before run (recovery-style wipe).\n")
+            clean_pipeline_data(test_mode=False)
     elif args.force_clean or (test_mode and not args.no_clean):
         print(f"\n=== Cleaning pipeline data ({'test' if test_mode else 'production'}) ===\n")
         clean_pipeline_data(test_mode=test_mode)
@@ -340,14 +478,22 @@ def main():
 
     # 3. process_features.py - Process features and create parquet file
     features_cmd = [sys.executable, 'pipeline/process_features.py']
+    if args.full_test and args.drop_incomplete:
+        print(
+            "[INFO] --drop-incomplete with full test/weekly mode: tickers with <500 combined "
+            "rows are dropped; ensure historical bootstrap or expect sparse/empty output."
+        )
+
     if args.full_test:
-        # Full test mode: comprehensive feature processing
-        features_cmd.extend(['--full-test', '--drop-incomplete'])
+        # Full test mode: comprehensive feature processing; strict row gate is optional
+        features_cmd.append('--full-test')
+        if args.drop_incomplete:
+            features_cmd.append('--drop-incomplete')
     elif test_mode:
         # Test mode: limited feature processing
         features_cmd.append('--test-mode')
-    elif not args.prod:
-        # Default / manual full: keep length gate on combined output
+    elif not args.prod and args.drop_incomplete:
+        # Optional strict gate (off by default so daily runs work with partial historical)
         features_cmd.append('--drop-incomplete')
     # Prod: base command only — recent feature slice for every ticker; raw OHLCV stays
     # under data/raw/. Apply completeness/quality filters in downstream analytics.
@@ -368,16 +514,16 @@ def main():
                               None if features_ok else "process_features.py failed")
     
     # Validation: check for features.parquet and metadata.json
-    from datetime import datetime
-    today_str = datetime.now().strftime('dt=%Y-%m-%d')
-    
+    today = datetime.now()
+    today_str = today.strftime('dt=%Y-%m-%d')
+
     if test_mode:
         features_path = Path('data/test/processed') / today_str / 'features.parquet'
         metadata_path = Path('logs/test/features') / today_str / 'metadata.json'
     else:
         features_path = Path('data/processed') / today_str / 'features.parquet'
         metadata_path = Path('logs/features') / today_str / 'metadata.json'
-    
+
     if features_path.exists() and metadata_path.exists():
         print(f"[VALIDATION] features.parquet and metadata.json found for {today_str}")
     else:
@@ -386,10 +532,23 @@ def main():
         if not metadata_path.exists():
             print(f"[WARNING] metadata.json missing for {today_str}")
 
+    if features_ok and not test_mode:
+        q_ok, q_msg = validate_production_features_output(test_mode, today)
+        if not q_ok:
+            print(f"[VALIDATION ERROR] {q_msg}")
+            failed_steps.append('output_validation')
+            errors.append(q_msg)
+            success = False
+        else:
+            print("[VALIDATION] production output thresholds passed (config/output_validation)")
+
     # 4. Run all tests
+    test_time = 0
     if args.prod:
         print("[PROD] Tests skipped in production mode.")
-        test_time = 0
+        summary['run_all_tests'] = True
+    elif args.skip_tests:
+        print("[INFO] Tests skipped (--skip-tests).")
         summary['run_all_tests'] = True
     else:
         print("=== Running All Tests (pytest) ===")
@@ -409,7 +568,7 @@ def main():
             failed_steps.append('run_all_tests.py')
             errors.append('run_all_tests.py failed')
         success &= test_ok
-        
+
         # Log checkpoint for testing
         if monitor and run_id:
             monitor.log_checkpoint(run_id, "testing", 4 if test_ok else 3, 4, time.time() - start_time,
@@ -464,7 +623,9 @@ def main():
     print(f"fetch_tickers.py:     {'PASS' if summary.get('fetch_tickers', True) else 'FAIL'} ({t_time:.1f}s)")
     print(f"fetch_data.py:        {'PASS' if summary.get('fetch_data', True) else 'FAIL'} ({d_time:.1f}s)")
     print(f"process_features.py:  {'PASS' if summary.get('process_features', True) else 'FAIL'} ({f_time:.1f}s)")
-    if not args.prod:
+    if args.prod or args.skip_tests:
+        print(f"run_all_tests.py:     SKIP ({test_time:.1f}s)")
+    else:
         print(f"run_all_tests.py:     {'PASS' if summary.get('run_all_tests', True) else 'FAIL'} ({test_time:.1f}s)")
     print(f"Total pipeline time:  {total_time:.1f} seconds")
     
@@ -501,13 +662,17 @@ def main():
         print("Mode: PRODUCTION (full data processing)")
     
     if success:
-        print("\n🎉 Pipeline completed successfully and all tests passed!")
+        if args.prod or args.skip_tests:
+            print("\n🎉 Pipeline completed successfully!")
+        else:
+            print("\n🎉 Pipeline completed successfully and all tests passed!")
         sys.exit(0)
     else:
         print("\n❌ Pipeline failed.")
         if failed_steps:
             print(f"Failed steps: {', '.join(failed_steps)}")
-        print("Tests failed. Run `python run_all_tests.py` for details.")
+        if not (args.prod or args.skip_tests):
+            print("Tests failed. Run `python run_all_tests.py` for details.")
         sys.exit(1)
 
 if __name__ == "__main__":

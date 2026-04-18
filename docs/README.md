@@ -25,6 +25,9 @@ project_root/
 │   ├── test_fetch_tickers.py
 │   ├── test_process_features.py
 │   └── run_all_tests.py
+├── ops/                        # Portable prod entrypoints (env, launchd/systemd samples)
+│   ├── run_prod_data.sh        # Daily full-universe data build (--full --skip-tests)
+│   └── env.example
 ├── scripts/                    # Automation scripts
 │   ├── run_daily_tests.py      # Daily smoke tests
 │   ├── run_weekly_tests.py     # Weekly full tests
@@ -78,29 +81,70 @@ pip install -r requirements.txt
 bash scripts/setup_cron.sh
 ```
 
-### Manual Pipeline Run
+### Manual pipeline run (operator guide)
+
+**Golden path — full S&P universe under `data/`, with pytest (local confidence):**
+
 ```bash
-# Full production run (all 503 S&P 500 tickers)
+python pipeline/run_pipeline.py --full --parallel 8
+```
+
+**Scheduled-style run — same data paths, skip pytest (matches cron / `ops/run_prod_data.sh`):**
+
+```bash
+python pipeline/run_pipeline.py --full --parallel 8 --skip-tests
+# or: bash ops/run_prod_data.sh
+```
+
+**Recovery wipe then full fetch (deletes all of `data/processed` and `logs/features` first):**
+
+```bash
 python pipeline/run_pipeline.py --prod
+```
 
-# Test run (5 tickers, isolated test data)
+**Routine `--prod` without deleting prior processed partitions:**
+
+```bash
+python pipeline/run_pipeline.py --prod --prod-no-clean
+```
+
+**Strict 500-row combined-history gate (modeling only; requires deep historical bootstrap):**
+
+```bash
+python pipeline/run_pipeline.py --full --drop-incomplete
+```
+
+**Test run (limited tickers, `data/test/` only):**
+
+```bash
 python pipeline/run_pipeline.py --test
+```
 
-# Daily integrity test
+**Daily integrity (smoke — NOT the full S&P job; uses `--daily-integrity` and test dirs):**
+
+```bash
 python pipeline/run_pipeline.py --daily-integrity
+```
 
-# Weekly integrity test
+**Weekly integrity (full tests + full pipeline):**
+
+```bash
 python pipeline/run_pipeline.py --weekly-integrity
 ```
 
+Output quality for `--full` / `--prod` is enforced using `output_validation` in [`config/settings.yaml`](../config/settings.yaml). Portable scheduling samples live under [`ops/`](../ops/).
+
 ## 📊 Automated Schedule
 
-The pipeline runs automatically with the following schedule:
+After `bash scripts/setup_cron.sh`, the default schedule is:
 
-- **4:00 AM Daily**: Full production run (503 tickers) - Uses `--weekly-integrity` for production mode
-- **2:00 AM Daily**: Test data cleanup (`--test-only` preserves production data)
+- **4:00 AM Daily**: Production **data** build — [`ops/run_prod_data.sh`](../ops/run_prod_data.sh) → `run_pipeline.py --full --skip-tests` (full tickers, `data/raw` / `data/processed`, log `logs/cron_prod_data.log`)
+- **8:00 AM Sundays**: Weekly integrity — [`scripts/run_weekly_tests.py`](../scripts/run_weekly_tests.py) → `--weekly-integrity` (full pytest; log `logs/cron_weekly.log`)
+- **2:00 AM Daily**: Test data cleanup (`cleanup_old_reports.py --test-only`)
 - **3:00 AM Sundays**: Production data cleanup (30-day retention)
 - **Every 15 minutes**: Integrity monitoring
+
+Optional daily smoke (`scripts/run_daily_tests.py`, subset tickers) is **commented out** in the installed crontab; uncomment there if you want it.
 
 ### Cron Job Verification
 ```bash

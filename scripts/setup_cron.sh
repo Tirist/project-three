@@ -47,6 +47,13 @@ fi
 # Create logs directory if it doesn't exist
 mkdir -p "$PROJECT_DIR/logs"
 
+if [ -f "$PROJECT_DIR/ops/run_prod_data.sh" ]; then
+    chmod +x "$PROJECT_DIR/ops/run_prod_data.sh" 2>/dev/null || true
+else
+    echo -e "${RED}Error: ops/run_prod_data.sh not found at $PROJECT_DIR/ops/run_prod_data.sh${NC}"
+    exit 1
+fi
+
 # Create a temporary file for the crontab
 TEMP_CRON=$(mktemp)
 
@@ -61,9 +68,15 @@ PYTHONPATH=$PROJECT_DIR
 PIPELINE_MODE=prod
 PYTHONUNBUFFERED=1
 
-# Project Three Data Pipeline - Daily Production Run (FULL RUN - NO --test)
-# Run daily at 4:00 AM - Fresh production data ready by 6:00 AM
-0 4 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/run_weekly_tests.py >> logs/cron_daily.log 2>&1
+# Project Three Data Pipeline - Daily production DATA (full universe, no pytest)
+# Golden path: ops/run_prod_data.sh -> pipeline/run_pipeline.py --full --skip-tests
+0 4 * * * cd $PROJECT_DIR && bash ops/run_prod_data.sh >> logs/cron_prod_data.log 2>&1
+
+# Weekly heavy integrity (full pytest + full pipeline) — Sunday 8:00 AM
+0 8 * * 0 cd $PROJECT_DIR && $PYTHON_PATH scripts/run_weekly_tests.py >> logs/cron_weekly.log 2>&1
+
+# Optional daily smoke (subset tickers, data/test/) — uncomment to enable (e.g. 5:30 AM)
+# 30 5 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/run_daily_tests.py >> logs/cron_daily_smoke.log 2>&1
 
 # Project Three Data Pipeline - Cleanup Test Data Only
 # Run daily at 2:00 AM - Only clears test data, preserves production data for 30 days
@@ -153,65 +166,16 @@ EOF
 chmod +x "$ROTATE_SCRIPT"
 echo -e "${GREEN}✅ Log rotation script created at $ROTATE_SCRIPT${NC}"
 
-# Create a test script to verify setup
 TEST_SCRIPT="$PROJECT_DIR/scripts/test_cron_setup.sh"
-cat > "$TEST_SCRIPT" << EOF
-#!/bin/bash
-# Test script to verify cron setup
-
-echo "Testing Project Three pipeline cron setup..."
-
-# Test Python environment
-if [ -f "$PYTHON_PATH" ]; then
-    echo "✅ Python environment found"
-else
-    echo "❌ Python environment not found"
-    exit 1
-fi
-
-# Test configuration file
-if [ -f "$PROJECT_DIR/config/test_schedules.yaml" ]; then
-    echo "✅ Configuration file found"
-else
-    echo "❌ Configuration file not found"
-    exit 1
-fi
-
-# Test scripts
-for script in run_daily_tests.py run_weekly_tests.py cleanup_old_reports.py; do
-    if [ -f "$PROJECT_DIR/scripts/\$script" ]; then
-        echo "✅ \$script found"
-    else
-        echo "❌ \$script not found"
-        exit 1
-    fi
-done
-
-# Verify no --test flags in automated runs
-echo "Verifying cron integrity..."
-if grep -q "--test" "$PROJECT_DIR/scripts/run_daily_tests.py" && ! grep -q "--daily-integrity" "$PROJECT_DIR/scripts/run_daily_tests.py"; then
-    echo "❌ Daily script contains --test flag"
-    exit 1
-fi
-
-if grep -q "--test" "$PROJECT_DIR/scripts/run_weekly_tests.py" && ! grep -q "--weekly-integrity" "$PROJECT_DIR/scripts/run_weekly_tests.py"; then
-    echo "❌ Weekly script contains --test flag"
-    exit 1
-fi
-
-echo "✅ Cron integrity verified - no --test flags in automated runs"
-
-echo "✅ All tests passed - cron setup is ready!"
-EOF
-
-chmod +x "$TEST_SCRIPT"
-echo -e "${GREEN}✅ Test script created at $TEST_SCRIPT${NC}"
+chmod +x "$TEST_SCRIPT" 2>/dev/null || true
+echo -e "${GREEN}✅ Cron verifier (version-controlled): $TEST_SCRIPT${NC}"
 
 echo ""
 echo -e "${GREEN}=== CRON SETUP COMPLETE ===${NC}"
 echo ""
 echo "Installed jobs:"
-echo "  - Daily production run: 4:00 AM daily (FULL RUN - NO --test)"
+echo "  - Daily production DATA: 4:00 AM (ops/run_prod_data.sh -> --full --skip-tests)"
+echo "  - Weekly integrity: 8:00 AM Sundays (scripts/run_weekly_tests.py)"
 echo "  - Cleanup test data: 2:00 AM daily"
 echo "  - Full cleanup (30-day retention): 3:00 AM Sundays"
 echo "  - Integrity monitoring: Every 15 minutes"
@@ -222,7 +186,8 @@ echo "  - PIPELINE_MODE=prod"
 echo "  - PYTHONUNBUFFERED=1"
 echo ""
 echo "Log files will be written to:"
-echo "  - logs/cron_daily.log"
+echo "  - logs/cron_prod_data.log"
+echo "  - logs/cron_weekly.log"
 echo "  - logs/cron_cleanup.log"
 echo "  - logs/cron_monitor.log"
 echo ""
@@ -234,12 +199,12 @@ echo "Useful commands:"
 echo "  - View current cron jobs: crontab -l"
 echo "  - Edit cron jobs: crontab -e"
 echo "  - Remove all cron jobs: crontab -r"
-echo "  - Test setup: $TEST_SCRIPT"
+echo "  - Verify setup: bash $TEST_SCRIPT"
 echo "  - Manual log rotation: $ROTATE_SCRIPT"
-echo "  - Check cron integrity: $PYTHON_PATH integrity_monitor.py --check-cron"
+echo "  - Check cron integrity: $PYTHON_PATH pipeline/utils/integrity_monitor.py --check-cron"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Run: $TEST_SCRIPT"
+echo "1. Run: bash $TEST_SCRIPT"
 echo "2. Check logs after first run"
-echo "3. Configure notifications in config/test_schedules.yaml"
-echo "4. Monitor pipeline status: $PYTHON_PATH integrity_monitor.py --monitor-pipeline" 
+echo "3. Configure notifications: set PIPELINE_WEBHOOK_URL or WEBHOOK_URL, or edit config/test_schedules.yaml"
+echo "4. Monitor pipeline status: $PYTHON_PATH pipeline/utils/integrity_monitor.py --monitor-pipeline" 

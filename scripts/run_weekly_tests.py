@@ -19,6 +19,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from notify_util import resolve_webhook_url
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -99,9 +102,8 @@ def send_notification(message: str, config: Dict[str, Any]) -> None:
     """Send notification on failure."""
     if not config.get('notifications', {}).get('enabled', False):
         return
-    
-    # Simple webhook notification (can be extended for email/Slack)
-    webhook_url = config.get('notifications', {}).get('webhook_url')
+
+    webhook_url = resolve_webhook_url(config)
     if webhook_url:
         try:
             import requests
@@ -140,7 +142,6 @@ def main() -> int:
         "--weekly-integrity",
         "--parallel", str(parallel_workers),
         "--clean",
-        "--drop-incomplete"
     ]
     
     success, runtime, output = run_with_timeout(

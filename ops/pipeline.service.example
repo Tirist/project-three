@@ -1,0 +1,15 @@
+[Unit]
+Description=Project Three stock pipeline (daily production data)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=REPLACE_WITH_ABSOLUTE_REPO_PATH
+Environment=PIPELINE_MODE=prod
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash REPLACE_WITH_ABSOLUTE_REPO_PATH/ops/run_prod_data.sh
+StandardOutput=append:REPLACE_WITH_ABSOLUTE_REPO_PATH/logs/systemd_prod_data.log
+StandardError=append:REPLACE_WITH_ABSOLUTE_REPO_PATH/logs/systemd_prod_data.err.log
+
+[Install]
+WantedBy=default.target

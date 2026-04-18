@@ -34,6 +34,9 @@
 ### ⚙️ Configuration
 - **`config/`** - Configuration files
 
+### 🚀 Operations (portable scheduling)
+- **`ops/`** - Production data entrypoint (`run_prod_data.sh`), `env.example`, launchd/systemd samples
+
 ### 🔄 Pipeline
 - **`pipeline/`** - Main pipeline code
 

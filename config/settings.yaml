@@ -26,6 +26,15 @@ alpha_vantage_api_key: "6CVZ0Z8NSWD386W0"  # Add your Alpha Vantage API key here
 min_tickers_expected: 500
 max_tickers_expected: 510
 
+# Fail run_pipeline --full / --prod if today's features output is unusably small.
+# See docs/README.md (Production operator guide).
+output_validation:
+  enabled: true
+  min_total_rows: 1
+  min_distinct_tickers: 400
+  # If set (e.g. 0.85), also require today's ticker count >= ratio * prior trading day's count.
+  min_tickers_ratio_of_prior_day: null
+
 # Retention and cleanup settings
 retention_days: 30
 cleanup_enabled: true

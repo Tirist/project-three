@@ -47,8 +47,10 @@ integrity_reports:
     min_test_pass_rate: 90
 
 # Notification Configuration
+# Prefer environment variables for secrets: PIPELINE_WEBHOOK_URL or WEBHOOK_URL
+# (see scripts/notify_util.py). Enable after configuring a real webhook.
 notifications:
-  enabled: true
+  enabled: false
   channels:
     - webhook
     - email
@@ -58,7 +60,7 @@ notifications:
     daily: ["data-team@company.com"]
     weekly: ["data-team@company.com", "engineering@company.com"]
   
-  webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+  webhook_url: ""
   
   # Email configuration (requires smtp settings)
   email:
@@ -68,9 +70,9 @@ notifications:
     password: "your-app-password"
     from_address: "pipeline@company.com"
   
-  # Slack configuration
+  # Slack configuration (override via env; do not commit real URLs)
   slack:
-    webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+    webhook_url: ""
     channel: "#data-pipeline"
     username: "Pipeline Bot"
     icon_emoji: ":robot_face:"
